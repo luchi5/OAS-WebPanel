@@ -1,0 +1,14 @@
+# Start-Panel.ps1 -Public supplies these values from settings.json.
+# Install Caddy separately and copy this file to Caddyfile before use.
+{
+    admin off
+    auto_https disable_redirects
+}
+
+{$OAS_PANEL_PUBLIC_ORIGIN} {
+    reverse_proxy {$OAS_PANEL_UPSTREAM} {
+        header_up Host {http.request.host}
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-For {http.request.remote.host}
+    }
+}

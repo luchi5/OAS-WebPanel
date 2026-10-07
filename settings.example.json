@@ -1,0 +1,9 @@
+{
+  "host": "127.0.0.1",
+  "port": 22300,
+  "public_origin": "http://127.0.0.1:22300",
+  "backend_url": "http://127.0.0.1:22289",
+  "backend_root": "C:/path/to/OnmyojiAutoScript",
+  "authentication_required": true,
+  "state_dir": "state"
+}

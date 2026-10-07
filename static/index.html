@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#313033">
+  <title>OASX / 主页</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/oasx.css">
+  <link rel="stylesheet" href="/static/app.css?v=20261007-task-toggle">
+  <script src="/static/app.js?v=20261007-task-toggle" defer></script>
+</head>
+<body>
+  <div id="loading-screen" class="loading-screen"><span class="brand-mark">O</span><span>正在连接工作台…</span></div>
+  <main id="login-screen" class="login-screen" hidden>
+    <section class="login-intro">
+      <div class="brand"><span class="brand-mark">O</span><span>阴阳师 <small>OAS 工作台</small></span></div>
+      <div><div class="eyebrow">阴阳师 · 自动化助手</div><h1>日常有序，<br>自在掌握。</h1><p>在电脑与手机之间，<br>随时查看任务进度，调整每一次运行。</p></div>
+      <span class="login-footnote">你的配置与任务，集中在一处。</span>
+    </section>
+    <section class="login-card"><span class="eyebrow">欢迎回来</span><h2>登录工作台</h2><p class="muted">使用你的工作台账号继续。</p>
+      <form id="login-form">
+        <label for="login-username">用户名</label><input id="login-username" name="username" autocomplete="username" required autofocus>
+        <label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required>
+        <p id="login-error" class="inline-error" role="alert" hidden></p>
+        <button id="login-submit" type="submit" class="button primary full">登录</button>
+      </form>
+      <p class="login-security">仅在你明确操作时，工作台才会修改配置或启停任务。</p>
+    </section>
+  </main>
+
+  <div id="app" class="app" data-mobile-panel="tasks" hidden>
+    <header class="topbar">
+      <div class="brand"><img src="/static/assets/oasx.png" alt="" width="28" height="28"><span>OASX / 主页</span></div>
+      <div class="connection-summary" hidden><span id="connection-dot" class="status-dot"></span><span id="backend-name"></span><span id="backend-domain"></span></div>
+      <a class="daily-feedback-entry" href="/daily-feedback">每日验收</a>
+      <button id="preferences-open" class="icon-button" type="button" aria-label="设置" title="设置"><span class="mi" aria-hidden="true">&#xf0164;</span></button>
+    </header>
+    <div id="connection-banner" class="connection-banner" role="status" hidden><span id="connection-message"></span><button id="reconnect" class="button small" type="button">重新连接</button></div>
+    <div class="workspace">
+      <aside class="panel accounts-panel" data-panel="accounts" aria-label="配置账号">
+        <div class="panel-heading"><h2>配置 <span class="config-counts"><span id="running-count">0</span>/<span id="stopped-count">0</span>/<span id="attention-count">0</span></span><span id="account-count" hidden>0</span></h2><div class="collection-actions"><button id="refresh-accounts" class="icon-button" type="button" title="刷新" aria-label="刷新配置列表"><span class="mi" aria-hidden="true">&#xf00e9;</span></button><button class="icon-button" type="button" disabled title="配置联动请在桌面 OASX 操作" aria-label="配置联动：桌面 OASX 中使用"><span class="mi" aria-hidden="true">&#xf85a;</span></button><button class="icon-button" type="button" disabled title="添加配置请在桌面 OASX 操作" aria-label="添加配置：桌面 OASX 中使用"><span class="mi" aria-hidden="true">&#xf537;</span></button></div></div>
+        <div class="account-filters"><div class="search-wrap"><span class="mi" aria-hidden="true">&#xf013d;</span><input id="account-search" type="search" placeholder="搜索配置" aria-label="搜索配置"></div><div class="icon-select"><span class="mi" aria-hidden="true">&#xf75b;</span><select id="account-state-filter" aria-label="筛选配置状态" title="筛选配置状态"><option value="all">全部</option><option value="running">运行中</option><option value="stopped">已停止</option><option value="attention">异常</option></select></div></div>
+        <div id="account-list" class="account-list scroll-area" role="list"></div>
+        <div class="quick-settings" hidden><button id="open-global-settings" type="button">全局配置</button><button id="open-script-settings" type="button">脚本</button></div>
+        <button id="mobile-password-open" type="button" hidden>修改密码</button>
+      </aside>
+      <div class="pane-divider" role="separator" aria-label="调整配置栏宽度" aria-orientation="vertical" tabindex="0" data-divider="accounts"></div>
+      <main class="panel tasks-panel" data-panel="tasks" aria-label="任务与设置">
+        <div class="selected-heading"><button class="icon-button compact-only" type="button" data-mobile-target="accounts" title="返回配置" aria-label="返回配置"><span class="mi" aria-hidden="true">&#xf572;</span></button><h1 id="selected-account">请选择配置</h1><span id="selected-status" class="config-indicator" title="等待连接"></span><button id="power-task" class="icon-button" type="button" title="启动" aria-label="启动配置" disabled><span class="mi" aria-hidden="true">&#xf00b8;</span></button><div hidden><button id="start-task" type="button">启动</button><button id="stop-task" type="button">停止</button></div></div>
+        <div id="task-focus" hidden><span id="focus-label"></span><h2 id="focus-title"></h2><p id="focus-description"></p><button id="focus-settings" type="button">查看参数</button></div>
+        <div class="work-tabs"><div class="scope-switch" role="group" aria-label="任务视图"><button id="scope-schedule" class="selected" type="button" aria-pressed="true">总览</button><button id="scope-catalog" type="button" aria-pressed="false">任务</button></div><button class="choice-chip compact-log-tab" data-mobile-target="logs" type="button">日志</button><button id="compact-stats-tab" class="choice-chip compact-log-tab" type="button">统计</button><button id="settings-tab" type="button" hidden>参数 <span id="dirty-count" hidden>0</span></button><span id="schedule-summary" hidden></span></div>
+        <section id="tasks-view" class="tasks-view"><div class="task-filters"><div class="search-wrap"><span class="mi" aria-hidden="true">&#xf013d;</span><input id="task-search" type="search" placeholder="搜索任务" aria-label="搜索任务"></div><div id="category-tabs" class="icon-select" hidden><span class="mi" aria-hidden="true">&#xf75b;</span></div></div><p id="task-toggle-hint" class="task-toggle-hint">勾选即保存；取消勾选停止后续调度，不中断当前任务。</p><div id="task-list" class="task-list scroll-area"></div></section>
+        <section id="settings-view" class="settings-view" hidden><div class="settings-heading"><button id="tasks-tab" class="icon-button" type="button" aria-label="返回任务" title="返回任务"><span class="mi" aria-hidden="true">&#xf572;</span></button><h2 id="selected-task">任务参数</h2><span id="selected-category" hidden></span><button id="refresh-settings" class="icon-button" type="button" aria-label="刷新参数" title="刷新参数"><span class="mi" aria-hidden="true">&#xf00e9;</span></button></div><div id="settings-content" class="settings-content scroll-area"></div><div class="save-bar"><strong id="save-status">未作修改</strong><div><button id="discard-settings" class="button subtle small" type="button" disabled>取消</button><button id="save-settings" class="button primary small" type="button" disabled>保存</button></div></div></section>
+      </main>
+      <div class="pane-divider right-divider" role="separator" aria-label="调整任务与日志栏宽度" aria-orientation="vertical" tabindex="0" data-divider="logs"></div>
+      <aside class="panel logs-panel" data-panel="logs" aria-label="日志与错误记录">
+        <div class="sidebar-tabs"><button id="compact-overview-tab" class="choice-chip compact-log-tab" type="button">总览</button><button id="compact-catalog-tab" class="choice-chip compact-log-tab" type="button">任务</button><button id="activity-logs-tab" class="choice-chip selected" type="button" aria-pressed="true">日志</button><button id="activity-stats-tab" class="choice-chip" type="button" aria-pressed="false">统计</button><span id="live-label" class="live-label" hidden></span></div>
+        <div id="log-center" class="log-center"><div class="log-toolbar"><div class="log-tabs" role="tablist" aria-label="日志类型"><button id="logs-tab" class="selected" role="tab" aria-selected="true" type="button">信息</button><button id="errors-tab" role="tab" aria-selected="false" type="button">错误</button></div><div class="log-actions"><div class="icon-select"><span class="mi" aria-hidden="true">&#xf75b;</span><select id="log-level" aria-label="日志级别" title="ALL"><option value="ALL">ALL</option><option value="INFO">INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select></div><button id="log-follow" class="icon-button" type="button" aria-pressed="true" title="自动滚动" aria-label="自动滚动"><span class="mi" aria-hidden="true">&#xf76d;</span></button><button id="log-copy" class="icon-button" type="button" title="复制" aria-label="复制日志"><span class="mi" aria-hidden="true">&#xf66c;</span></button><button id="log-clear" class="icon-button" type="button" title="清空当前显示" aria-label="清空当前显示"><span class="mi" aria-hidden="true">&#xefaa;</span></button></div></div>
+          <section id="logs-view" class="logs-view"><div hidden><span id="log-count"></span><button id="log-filter-key" type="button">关键日志</button><button id="log-filter-all" type="button">全部日志</button></div><div id="log-content" class="log-content scroll-area" tabindex="0" aria-label="实时信息日志"></div><div id="log-paused" class="log-paused" hidden>已暂停滚动<button id="log-resume" type="button">回到最新 ↓</button></div></section>
+          <section id="errors-view" class="errors-view" hidden><div class="error-toolbar"><span id="errors-scope">请选择配置</span><button id="refresh-errors" class="icon-button" type="button" title="刷新记录" aria-label="刷新记录"><span class="mi" aria-hidden="true">&#xf00e9;</span></button></div><div id="error-list" class="error-list scroll-area"></div><article id="error-detail" class="error-detail scroll-area" hidden><div class="error-detail-heading"><button id="error-back" class="icon-button" type="button" aria-label="返回错误列表" title="返回列表"><span class="mi" aria-hidden="true">&#xf572;</span></button><button id="error-copy" class="icon-button" type="button" aria-label="复制错误日志" title="复制日志"><span class="mi" aria-hidden="true">&#xf66c;</span></button></div><h3 id="error-date"></h3><div id="error-images" class="error-images"></div><p id="error-truncated" class="notice" hidden>日志较长，当前仅显示部分内容。</p><pre id="error-log"></pre></article></section>
+        </div>
+        <section id="statistics-view" class="statistics-view" aria-label="当前配置的运行统计" hidden>
+          <div class="statistics-toolbar"><label for="statistics-date">日期</label><select id="statistics-date" aria-label="统计日期" disabled><option value="">暂无日期</option></select><button id="statistics-refresh" class="icon-button" type="button" title="刷新统计" aria-label="刷新统计"><span class="mi" aria-hidden="true">&#xf00e9;</span></button></div>
+          <p id="statistics-source" class="statistics-source"></p>
+          <details id="statistics-method" class="statistics-method" hidden><summary>统计口径</summary><p id="statistics-method-detail"></p></details>
+          <p id="statistics-status" class="statistics-status" role="status" aria-live="polite"></p>
+          <p id="statistics-error" class="statistics-error" role="alert" hidden></p>
+          <div id="statistics-content" class="statistics-content scroll-area"><div class="empty-state"><h3>请选择配置</h3><p>选择配置后查看日志中已记录的运行统计。</p></div></div>
+        </section>
+      </aside>
+    </div>
+    <nav class="mobile-nav" aria-label="工作区导航"><button data-mobile-target="accounts" type="button"><span class="mi" aria-hidden="true">&#xf028a;</span>配置</button><button data-mobile-target="tasks" class="active" type="button"><span class="mi" aria-hidden="true">&#xf587;</span>任务</button><button data-mobile-target="logs" type="button"><span class="mi" aria-hidden="true">&#xf85d;</span>日志</button></nav>
+  </div>
+
+  <dialog id="preferences-dialog" class="dialog preferences-dialog"><div class="settings-page-heading"><h2>OASX / 设置</h2><button id="preferences-close" class="icon-button" type="button" aria-label="关闭设置"><span class="mi" aria-hidden="true">&#xf647;</span></button></div><section id="account-preferences" class="preference-card"><h3>用户设置</h3><div class="preference-row"><span>当前用户</span><span id="current-user"></span></div><div class="preference-row"><span>账号</span><div><button id="password-open" class="button subtle small" type="button">修改密码</button><button id="logout" class="button subtle small" type="button">退出登录</button></div></div></section><section class="preference-card"><h3>系统设置</h3><div class="preference-row"><span>切换主题</span><div class="scope-switch"><button id="theme-dark" class="selected" type="button" aria-pressed="true">深色</button><button id="theme-light" type="button" aria-pressed="false">浅色</button></div></div><div class="preference-row"><label for="preferences-log-filter">信息日志</label><select id="preferences-log-filter"><option value="all">显示全部日志</option><option value="key">收起调试日志</option></select></div></section></dialog>
+
+
+  <dialog id="transfer-dialog" class="dialog transfer-dialog">
+    <div class="settings-page-heading"><h2>配置备份与导入</h2><button id="transfer-close" class="icon-button" type="button" aria-label="关闭备份与导入">✕</button></div>
+    <p class="muted">导出当前已经保存的参数。导入整份配置会新建配置，所有任务默认停止。</p>
+    <label for="transfer-kind">操作范围</label><select id="transfer-kind"><option value="config">整份配置</option><option value="task">单个任务</option></select>
+    <label for="transfer-account">配置</label><select id="transfer-account"></select>
+    <div id="transfer-task-row" hidden><label for="transfer-task">任务</label><select id="transfer-task"></select></div>
+    <section class="transfer-section"><h3>导出</h3><div class="transfer-buttons"><button id="transfer-backup" class="button primary" type="button">完整备份</button><button id="transfer-share" class="button" type="button">脱敏分享</button></div><p class="muted">完整备份保留设备与通知设置；脱敏分享隐藏个人信息。</p></section>
+    <section class="transfer-section"><h3>导入</h3><div id="transfer-name-row"><label for="transfer-name">新配置名称</label><input id="transfer-name" maxlength="64" autocomplete="off" placeholder="请输入未使用的名称"></div><label for="transfer-file">JSON 文件</label><input id="transfer-file" type="file" accept=".json,application/json"><p id="transfer-import-hint" class="muted">不覆盖已有配置。文件最大 2 MiB。</p><button id="transfer-import" class="button primary" type="button">导入为新配置</button></section>
+    <p id="transfer-status" class="muted" role="status"></p><p id="transfer-error" class="inline-error" role="alert" hidden></p>
+  </dialog>
+  <dialog id="confirm-dialog" class="dialog"><form method="dialog"><span class="dialog-symbol">◇</span><h2 id="confirm-title"></h2><p id="confirm-message"></p><div class="dialog-actions"><button id="confirm-cancel" class="button" value="cancel">取消</button><button id="confirm-accept" class="button primary" value="confirm">确定</button></div></form></dialog>
+  <dialog id="password-dialog" class="dialog"><form id="password-form"><span class="eyebrow">账号安全</span><h2 id="password-title">修改密码</h2><p id="password-hint" class="muted">更新用于登录工作台的密码。</p><label for="current-password">当前密码</label><input id="current-password" name="current_password" type="password" autocomplete="current-password" required><label for="new-password">新密码</label><input id="new-password" name="new_password" type="password" autocomplete="new-password" minlength="6" required><small class="muted">至少 6 个字符，不要求字母、数字与符号混合。</small><label for="confirm-password">确认新密码</label><input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="6" required><p id="password-error" class="inline-error" role="alert" hidden></p><div class="dialog-actions"><button id="password-cancel" type="button" class="button">取消</button><button id="password-submit" type="submit" class="button primary">保存密码</button></div></form></dialog>
+  <dialog id="image-dialog" class="image-dialog"><button id="image-close" class="button" type="button" aria-label="关闭截图">关闭 ✕</button><img id="image-preview" alt="错误现场截图"></dialog>
+  <div id="toasts" class="toasts" aria-live="polite" aria-relevant="additions"></div>
+</body>
+</html>
