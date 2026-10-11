@@ -367,7 +367,26 @@ def create_app(settings: dict, *, client=None, auth=None, statistics=None) -> Fa
     stats = statistics if statistics is not None else client if client is not None else LocalStatisticsReader(backend_root)
     error_root = backend_root / "log" / "error"
     legacy_error_owners = ArchiveLogOwners(backend_root)
-    daily_feedback = DailyFeedbackReader(backend_root)
+    daily_feedback = DailyFeedbackReader(backend_root, history_root=store.state_dir / 'task_history')
+    async def archive_task_plans():
+        while True:
+            await asyncio.sleep(60)
+            await asyncio.to_thread(daily_feedback.capture_plans)
+
+    @app.on_event('startup')
+    async def start_task_history():
+        await asyncio.to_thread(daily_feedback.capture_plans)
+        app.state.task_history_job = asyncio.create_task(archive_task_plans())
+
+    @app.on_event('shutdown')
+    async def stop_task_history():
+        job = getattr(app.state, 'task_history_job', None)
+        if job is not None:
+            job.cancel()
+            try:
+                await job
+            except asyncio.CancelledError:
+                pass
     locks: dict[str, asyncio.Lock] = {}
     action_cooldown: dict[str, float] = {}
     event_counts: dict[str, int] = {}

@@ -4,7 +4,19 @@
   const taskLabels = {Dokan: '道馆', CollectiveMissions: '寮集体任务', AbyssShadows: '峡间暗域', GuildBanquet: '寮宴会', DemonRetreat: '首领退治'};
   const outcomeLabels = {expired: '等待开场超时', failed: '执行失败', skipped: '已跳过', unconfirmed: '未核验', blocked_by_dokan: '道馆未完成，联动任务未执行'};
   const notificationLabels = {pending: '尚未发送', sending: '正在发送', accepted: '推送服务已接收', failed: '推送失败', disabled: '未启用推送'};
-  const state = {day: '', today: '', data: null, selected: null, loading: false, detailSignature: '', requestId: 0};
+  const completionLabels = {completed: '已完成', incomplete: '未完成', unverified: '待核验', disabled: '未开启', not_scheduled: '今日无需运行'};
+  function visibleData(data, selectedAccounts = []) {
+    const visibleAccounts = new Set(selectedAccounts.filter(value => Number.isInteger(value) && value > 0 && value <= 999));
+    if (!visibleAccounts.size) return data;
+    const accounts = data.accounts.filter(row => {
+      const match = /^(\d{1,3})(?:[-_\s]|$)/.exec(row.account);
+      return match && visibleAccounts.has(Number(match[1]));
+    });
+    const counts = Object.fromEntries(['attention', 'verified', 'pending', 'running', 'unverified', 'disabled'].map(status =>
+      [status, accounts.filter(row => row.status === status).length]));
+    return {...data, accounts, counts};
+  }
+  const state = {day: '', today: '', data: null, selected: null, loading: false, detailSignature: '', accountNumbers: [], requestId: 0};
   function localDay() {
     const parts = new Intl.DateTimeFormat('en', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'}).formatToParts(new Date());
     return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type).value).join('-');
@@ -33,11 +45,99 @@
     if (value !== undefined) node.textContent = String(value);
     return node;
   }
-  function badge(row) { return element('span', `status ${row.status}`, row.status_label); }
+  function displayText(value, fallback = '') {
+    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  }
+  function taskCompletion(row) {
+    const source = row && row.task_completion && (row.task_completion.service_checklist || row.task_completion);
+    const unavailable = note => ({available: false, tasks: [], counts: {completed: 0, incomplete: 0, unverified: 0}, note});
+    if (!source || typeof source !== 'object') return unavailable('任务完成情况待核验');
+    if (!['poster_checklist', 'enabled_today', 'executed_today', 'scheduled_today', 'historical_planned', 'historical_executed'].includes(source.scope)) return unavailable('任务完成情况待核验');
+    if (source.date !== row.date) return unavailable('任务完成情况与所选日期不一致，待核验');
+    if (source.available !== true) return unavailable(displayText(source.note, '该日期任务完成情况待核验'));
+    if (!Array.isArray(source.tasks)) return unavailable('任务完成情况待核验');
+    const counts = Object.fromEntries(Object.keys(completionLabels).map(status => [status, 0]));
+    const tasks = source.tasks.map((entry, index) => {
+      const item = entry && typeof entry === 'object' ? entry : {};
+      const task = displayText(item.task, `任务 ${index + 1}`);
+      const status = typeof item.status === 'string' && Object.prototype.hasOwnProperty.call(completionLabels, item.status) ? item.status : 'unverified';
+      counts[status]++;
+      return {task, group: item.group === 'weekly' ? 'weekly' : 'daily', label: displayText(item.label, Object.prototype.hasOwnProperty.call(taskLabels, task) ? taskLabels[task] : task), status,
+        status_label: task === 'CourtyardAffairs' && status === 'unverified' &&
+          ['没找到入口', '已无可领取', '未确认完成'].includes(item.status_label) ? item.status_label : completionLabels[status], reason: displayText(item.reason, '未提供核验说明'),
+        evidence_at: displayText(item.evidence_at) || null,
+        completion_count: task === 'KekkaiUtilize' && Number.isInteger(item.completion_count) && item.completion_count >= 0 && item.completion_count <= 1000 ? item.completion_count : null};
+    });
+    return {available: true, scope: source.scope, tasks, counts, note: displayText(source.note)};
+  }
+  function taskEvidenceTime(value) {
+    if (!value) return '未记录证据时间';
+    let stamp = String(value).trim().replace(' ', 'T');
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/.test(stamp)) return '证据时间待核验';
+    if (!/(?:Z|[+-]\d{2}:?\d{2})$/.test(stamp)) stamp += '+08:00';
+    const date = new Date(stamp);
+    if (Number.isNaN(date.getTime())) return '证据时间待核验';
+    const parts = new Intl.DateTimeFormat('en', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).formatToParts(date);
+    const part = type => parts.find(item => item.type === type).value;
+    return `证据时间：${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`;
+  }
+  const weeklyTasks = new Set(['Dokan', 'WeeklyTrifles']);
+  function taskResult(item) {
+    if (item.status === 'disabled' || item.status === 'not_scheduled') return item.status_label;
+    if (item.task === 'KekkaiUtilize') {
+      return Number.isInteger(item.completion_count) ? `${item.completion_count}次${item.status === 'unverified' ? ' · 待核验' : ''}` : '待核验';
+    }
+    if (item.task === 'AreaBoss') {
+      const match = /(?:已成功处理|已核验)\s+(\d{1,3})\/([1-3])\s*只/.exec(item.reason);
+      if (match) return `${match[1]}/${match[2]}${item.status === 'unverified' ? ' · 待核验' : ''}`;
+    }
+    return item.status_label;
+  }
+  function renderTaskCompletion(row, detailed = false) {
+    const report = taskCompletion(row);
+    const section = element(detailed ? 'section' : 'div', detailed ? 'detail-section task-completion' : 'task-overview');
+    section.append(element(detailed ? 'h3' : 'span', 'task-heading', report.scope && report.scope.startsWith('historical_') ? '当日任务完成情况' : '今日任务完成情况'));
+    if (!report.available) {
+      section.append(element('p', 'task-note', report.note));
+      return section;
+    }
+    if (!report.tasks.length) {
+      section.append(element('p', 'task-note', report.scope && report.scope.startsWith('historical_') ? '当日没有可恢复的其它任务记录' : report.scope === 'scheduled_today' ? '今天没有安排其它任务' : report.scope === 'executed_today' ? '今天尚无实际运行的其它任务' : '今天没有启用其它任务'));
+      if (report.note) section.append(element('p', 'task-note', report.note));
+      return section;
+    }
+    const counts = element('div', 'task-counts');
+    Object.keys(completionLabels).filter(status => report.scope === 'poster_checklist' ? report.counts[status] : ['completed', 'incomplete', 'unverified'].includes(status)).forEach(status => counts.append(element('span', `task-state ${status}`, `${completionLabels[status]} ${report.counts[status]}`)));
+    if (detailed || report.scope !== 'poster_checklist') section.append(counts);
+    const poster = report.scope === 'poster_checklist';
+    const isWeekly = item => poster ? item.group === 'weekly' : weeklyTasks.has(item.task);
+    const groups = [[poster ? '每日任务：' : '日常', report.tasks.filter(item => !isWeekly(item))],
+      [poster ? '每周任务：' : '周常', report.tasks.filter(isWeekly)]];
+    groups.forEach(([name, tasks]) => {
+      if (!tasks.length) return;
+      const group = element('div', 'task-group');
+      group.append(element('h4', 'task-group-heading', name));
+      const list = element('ul', detailed ? 'task-list' : 'task-chips');
+      tasks.forEach((item, index) => {
+        const entry = element('li', detailed ? 'task-item' : 'task-chip');
+        const line = detailed ? element('div', 'task-line') : entry;
+        line.append(element(detailed ? 'strong' : 'span', detailed ? 'task-name' : 'task-chip-label', `${poster ? `${index + 1}、` : ''}${item.label}`),
+          element('span', `task-state ${item.status}`, taskResult(item)));
+        if (detailed) entry.append(line, element('p', 'task-reason', item.reason),
+          element('p', 'task-time', taskEvidenceTime(item.evidence_at)));
+        list.append(entry);
+      });
+      group.append(list); section.append(group);
+    });
+    if (detailed && report.note) section.append(element('p', 'task-note', report.note));
+    return section;
+  }
+  function screenshotStatusLabel(row) { return `截图验收：${displayText(row.status_label, '待核验')}`; }
+  function badge(row) { return element('span', `status ${row.status}`, screenshotStatusLabel(row)); }
   function renderSummary(data) {
     const target = document.getElementById('summary');
     target.replaceChildren();
-    const items = [['attention', '需要关注', data.counts.attention], ['verified', '已核验', data.counts.verified], ['pending', data.date === data.today ? '待收尾' : '未核验', data.counts.pending + data.counts.running + data.counts.unverified], ['disabled', '未启用', data.counts.disabled]];
+    const items = [['attention', '截图需关注', data.counts.attention], ['verified', '截图已核验', data.counts.verified], ['pending', data.date === data.today ? '截图待收尾' : '截图未核验', data.counts.pending + data.counts.running + data.counts.unverified], ['disabled', '截图未启用', data.counts.disabled]];
     items.forEach(([key, label, count]) => {
       const card = element('div', `summary-item ${key}`);
       card.append(element('span', '', label), element('strong', '', count));
@@ -48,10 +148,10 @@
     const target = document.getElementById('account-list');
     target.replaceChildren();
     if (!data.accounts.length) { target.append(element('div', 'empty', '没有可读取的账号配置。')); return; }
-    data.accounts.forEach(row => {
+    [...data.accounts].sort((a, b) => a.account.localeCompare(b.account, 'zh-CN', {numeric: true})).forEach(row => {
       const card = element('button', `account-card ${row.status}`);
       card.type = 'button';
-      card.setAttribute('aria-label', `${row.account}，${row.status_label}，查看验收截图`);
+      card.setAttribute('aria-label', `${row.account}，${screenshotStatusLabel(row)}，查看任务完成情况与验收截图`);
       const identity = element('div', 'account-identity');
       identity.append(element('strong', 'account-name', row.account), badge(row));
       card.append(identity);
@@ -64,7 +164,7 @@
         metricNode.append(element('span', 'metric-time', clock(item.captured_at)));
         card.append(metricNode);
       });
-      card.append(element('span', 'card-action', '查看截图 ›'));
+      card.append(renderTaskCompletion(row), element('span', 'card-action', '查看详情与截图 ›'));
       card.addEventListener('click', () => openDetails(row.account));
       target.append(card);
     });
@@ -90,6 +190,7 @@
     const overview = element('div', 'detail-status');
     overview.append(badge(row), element('p', '', row.reason));
     target.append(overview);
+    target.append(renderTaskCompletion(row, true));
     const grid = element('div', 'evidence-grid');
     Object.keys(labels).forEach(kind => {
       const item = row.evidence[kind];
@@ -150,6 +251,7 @@
   function updateUrl() {
     const params = new URLSearchParams({date: state.day});
     if (state.selected) params.set('account', state.selected);
+    if (state.accountNumbers.length) params.set('accounts', state.accountNumbers.join(','));
     history.replaceState(null, '', `/daily-feedback?${params}`);
   }
   async function refresh() {
@@ -161,9 +263,10 @@
     try {
       const response = await fetch(`/api/daily-feedback?date=${encodeURIComponent(day)}`, {credentials: 'same-origin', cache: 'no-store'});
       if (response.status === 401) { document.getElementById('login-notice').hidden = false; return; }
-      const data = await response.json();
+      let data = await response.json();
       if (!response.ok) throw new Error(data.detail || '读取验收记录失败');
       if (requestId !== state.requestId || day !== state.day) return;
+      data = visibleData(data, state.accountNumbers);
       state.data = data;
       state.today = data.today;
       document.getElementById('error').hidden = true;
@@ -176,6 +279,7 @@
       if (state.selected) {
         const row = data.accounts.find(item => item.account === state.selected);
         if (row && JSON.stringify(row) !== state.detailSignature) openDetails(row.account);
+        else if (!row) document.getElementById('detail-dialog').close();
       }
     } catch (error) {
       const notice = document.getElementById('error');
@@ -208,6 +312,7 @@
     const requestedDay = params.get('date');
     state.day = requestedDay && /^\d{4}-\d{2}-\d{2}$/.test(requestedDay) && requestedDay <= state.today ? requestedDay : state.today;
     state.selected = params.get('account');
+    state.accountNumbers = (params.get('accounts') || '').split(',').slice(0, 100).map(Number).filter(value => Number.isInteger(value) && value > 0 && value <= 999);
     document.getElementById('report-date').value = state.day;
     document.getElementById('report-date').max = state.today;
     document.getElementById('report-date').addEventListener('change', event => setDay(event.target.value));
@@ -224,6 +329,6 @@
     refresh();
   }
   // Pure display helpers are exported for offline tests; no UI or OAS actions.
-  if (typeof module !== 'undefined' && module.exports) module.exports = {metric, clock, imageUrl, localDay, targetSummary};
+  if (typeof module !== 'undefined' && module.exports) module.exports = {metric, clock, imageUrl, localDay, targetSummary, taskCompletion, taskEvidenceTime, taskResult, visibleData};
   if (typeof document !== 'undefined') initialize();
 })();

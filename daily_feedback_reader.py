@@ -13,6 +13,9 @@ import re
 import stat
 
 from oas_client import account_identifier, statistics_date, ACCOUNT_IDENTIFIER
+from task_completion_reader import build_task_completion, _local_time
+from task_history import TaskHistory
+from service_checklist import build_service_checklist
 
 SHANGHAI = timezone(timedelta(hours=8))
 MAX_JSON = 2 * 1024 * 1024
@@ -105,8 +108,9 @@ def task_list(value):
 
 
 class DailyFeedbackReader:
-    def __init__(self, backend_root: Path, *, now=None):
+    def __init__(self, backend_root: Path, *, now=None, history_root=None):
         self.root = Path(backend_root)
+        self.history = TaskHistory(history_root) if history_root is not None else None
         self.now = now or (lambda: datetime.now(SHANGHAI))
 
     def today(self):
@@ -245,6 +249,298 @@ class DailyFeedbackReader:
                 'waiting': task_list(raw.get('waiting')), 'incomplete': incomplete,
                 'completed': task_list(raw.get('completed')), 'queued': fallback['queued']}
 
+    def _courtyard_proof(self, account, day):
+        sidecar = None
+        try:
+            proof = read_json(checked_path(self.root, 'log', 'courtyard_affairs', account, day + '.json'))
+            if (proof.get('schema_version') == 1 and proof.get('account') == account
+                    and proof.get('task') == 'CourtyardAffairs' and proof.get('date') == day
+                    and proof.get('source') == 'courtyard_affairs_task_v1'):
+                if proof.get('outcome') == 'completed':
+                    return proof
+                sidecar = proof
+        except (OSError, ValueError):
+            pass
+        # Legacy same-day attempts have no sidecar. Only a complete task
+        # segment with explicit page/claim evidence can provide a fallback.
+        try:
+            path = checked_path(self.root, 'log', day + '_' + account + '.txt')
+            with path.open('rb') as stream:
+                size = path.stat().st_size
+                stream.seek(max(0, size - MAX_JSON))
+                if size > MAX_JSON:
+                    stream.readline()
+                text = stream.read(MAX_JSON).decode('utf-8', errors='replace')
+        except (OSError, ValueError):
+            return sidecar
+        active = False
+        result = None
+        main = note = missing = done = after_main = intervening_click = False
+        clicks = 0
+        for line in text.splitlines():
+            event = re.match(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:\.\d+)?\s*\|\s*([\w]+\.py):\d+\s*\|\s*(?:INFO|WARNING)\s*\|\s*(.*?)\s*$', line)
+            if not event or event.group(1)[:10] != day:
+                continue
+            source, message = event.group(2), event.group(3)
+            if source == 'script.py' and message == 'Scheduler: Start task `CourtyardAffairs`':
+                active = True
+                main = note = missing = done = after_main = intervening_click = False
+                clicks = 0
+                continue
+            if not active:
+                continue
+            if source == 'logger.py' and message == '[UI] page_main' and not missing:
+                main = True
+            if missing and source == 'control.py' and message.startswith('Click ('):
+                intervening_click = True
+            if (missing and source == 'logger.py' and message.endswith('Page arrived page_main')
+                    and not intervening_click):
+                after_main = True
+            if source == 'control.py' and message.startswith('Click (') and '@ COURTYARD_AFFAIRS_NOTE' in message:
+                note = True
+            if source == 'control.py' and message.startswith('Click (') and re.search(r'@ (?:COURTYARD_AFFAIRS_COMPLETE_TASKS|BLUE_COMPLETE_TASKS)\s*$', message):
+                clicks += 1
+            if source in ('script_task.py', 'selected_skin.py', 'courtyard_affairs.py') and message == 'Courtyard affairs entry was not found':
+                missing = True
+            if source in ('script_task.py', 'selected_skin.py', 'courtyard_affairs.py', 'completion_state.py') and (
+                    message == 'Courtyard affairs completed' or message.endswith(
+                        'courtyard daily affairs completed; disabled button and completed rows confirmed')):
+                done = True
+            if source == 'script.py' and message == 'Scheduler: End task `CourtyardAffairs`':
+                active = False
+                stamp = re.match(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
+                if not stamp:
+                    continue
+                outcome = ('completed' if done and clicks > 0 else 'already_complete' if done
+                           else 'no_entry' if missing and main and after_main and not note and not intervening_click else 'failed')
+                candidate = {'schema_version': 1, 'account': account, 'task': 'CourtyardAffairs',
+                          'date': day, 'at': stamp.group(1), 'outcome': outcome,
+                          'one_click_count': clicks, 'source': 'courtyard_affairs_log_v1'}
+                if result is None or result['outcome'] != 'completed':
+                    result = candidate
+            elif source == 'script.py' and message.startswith('Scheduler: Start task `'):
+                active = False
+        if result is not None and result['outcome'] == 'completed':
+            return result
+        return sidecar if sidecar is not None else result
+
+    def _area_boss_proof(self, account, day):
+        try:
+            proof = read_json(checked_path(self.root, 'log', 'area_boss_completion', account, day + '.json'))
+            if (proof.get('account') == account and proof.get('date') == day
+                    and proof.get('task') == 'AreaBoss' and proof.get('source') == 'area_boss_task_v1'):
+                return proof
+        except (OSError, ValueError):
+            pass
+        return None
+
+    def _task_execution(self, account, day):
+        # An End line also follows some handled failures: pair it with a start
+        # and reject errors, recovery requests and worker boundaries.
+        try:
+            path = checked_path(self.root, 'log', day + '_' + account + '.txt')
+            with path.open('rb') as stream:
+                size = path.stat().st_size
+                if size > 32 * 1024 * 1024:
+                    return None
+                raw = stream.read(size)
+                if len(raw) != size:
+                    return None
+        except FeedbackNotFound as exc:
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return {'started': set(), 'finished': {}, 'kekkai_utilize': {
+                    'schema_version': 1, 'source': 'kekkai_utilize_log_v1',
+                    'task': 'KekkaiUtilize', 'date': day, 'count': 0, 'at': None}}
+            return None
+        except OSError:
+            return None
+        started, finished = set(), {}
+        active = None
+        failed = False
+        foster_stage = None
+        foster_events = {}
+        now = self.now().astimezone(SHANGHAI)
+        for line in raw.split(b'\n')[:-1]:
+            if len(line) > 65536:
+                return None
+            text = line.decode('utf-8-sig', errors='replace').rstrip('\r')
+            match = re.fullmatch(
+                r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)\s*\|\s*([A-Za-z_][A-Za-z0-9_]*\.py):\d+\s*\|\s*(INFO|WARNING|ERROR|CRITICAL|DEBUG)\s*\|\s*(.*?)\s*', text)
+            if not match or match.group(1)[:10] != day:
+                continue
+            try:
+                stamp = datetime.fromisoformat(match.group(1)).replace(tzinfo=SHANGHAI)
+            except ValueError:
+                continue
+            if stamp > now:
+                continue
+            source, level, message = match.group(2, 3, 4)
+            if (source == 'script.py' and message.startswith('Start scheduler loop:')
+                    or source == 'script_process.py' and re.fullmatch(r'Script .+ process exit', message)):
+                active = None
+                failed = False
+                foster_stage = None
+                continue
+            event = re.fullmatch(r'Scheduler: (Start|End) task `([A-Z][A-Za-z0-9]{0,63})`', message)
+            if source == 'script.py' and level == 'INFO' and event:
+                action, task = event.groups()
+                if action == 'Start':
+                    started.add(task)
+                    active = (task, stamp)
+                    failed = False
+                    foster_stage = None
+                else:
+                    if active and active[0] == task and stamp >= active[1] and not failed:
+                        finished[task] = stamp.isoformat(timespec='seconds')
+                    active = None
+                    failed = False
+                    foster_stage = None
+                continue
+            if active and (level in ('ERROR', 'CRITICAL')
+                    or source == 'config.py' and message.casefold() == 'task call: restart'):
+                failed = True
+                foster_stage = None
+            if active and active[0] == 'KekkaiUtilize' and not failed:
+                if level == 'WARNING' and message == 'Ocr remaining time error':
+                    foster_stage = None
+                elif level == 'INFO' and source == 'script_task.py' and message == '开始执行进入结界蹭卡流程':
+                    foster_stage = ('selected', stamp, stamp)
+                elif foster_stage and stamp >= foster_stage[2] and stamp - foster_stage[1] <= timedelta(minutes=10):
+                    phase, began, _ = foster_stage
+                    if level == 'INFO' and source == 'script_task.py' and message == 'Enter friend realm' and phase == 'selected':
+                        foster_stage = ('friend', began, stamp)
+                    elif level == 'INFO' and source == 'replace_shikigami.py' and re.fullmatch(r'Set shikigami: [1-7]', message) and phase == 'friend':
+                        foster_stage = ('placed', began, stamp)
+                    elif level == 'INFO' and source == 'script_task.py' and phase == 'placed':
+                        remaining = re.fullmatch(r'Utilize remaining time: (\d{1,2}):([0-5]\d):([0-5]\d)(?:\.\d{1,6})?', message)
+                        if remaining:
+                            hours, minutes, seconds = map(int, remaining.groups())
+                            if 0 < hours * 3600 + minutes * 60 + seconds <= 24 * 3600:
+                                # Count immediately after placement is confirmed, even
+                                # if unrelated harvesting later makes this run fail.
+                                foster_events[began.isoformat()] = stamp
+                            foster_stage = None
+        if len(foster_events) > 1000:
+            return None
+        last = max(foster_events.values()) if foster_events else None
+        return {'started': started, 'finished': finished, 'kekkai_utilize': {
+            'schema_version': 1, 'source': 'kekkai_utilize_log_v1',
+            'task': 'KekkaiUtilize', 'date': day, 'count': len(foster_events),
+            'at': last.isoformat(timespec='seconds') if last else None}}
+
+    def _started_tasks(self, account, day):
+        execution = self._task_execution(account, day)
+        return execution['started'] if execution is not None else None
+
+    def _task_completion(self, account, day, config, closeout):
+        # Read the coordinator's independent proofs without importing OAS or
+        # invoking its state helper, which would create directories and locks.
+        proofs = {}
+        try:
+            state = read_json(checked_path(self.root, 'config', 'daily_closeout', account + '.json'))
+            if state.get('date') == day and isinstance(state.get('outcomes'), dict):
+                proofs = state
+        except (OSError, ValueError):
+            pass
+        labels = {}
+        for parts in (('module', 'config', 'i18n', 'zh-CN.json'), ('assets', 'i18n', 'zh-CN.json')):
+            try:
+                labels.update(read_json(checked_path(self.root, *parts)))
+            except (OSError, ValueError):
+                pass
+        now = self.now()
+        today = now.astimezone(SHANGHAI).date().isoformat()
+        execution = self._task_execution(account, day)
+        started = execution['started'] if execution is not None else None
+        archived, archive_error = None, False
+        if self.history is not None:
+            try:
+                archived = self.history.load(account, day)
+            except (OSError, ValueError):
+                archive_error = True
+        historical = None
+        if day < today:
+            historical = set(started or ())
+            if archived:
+                historical.update(row['task'] for row in archived['tasks'])
+        courtyard = self._courtyard_proof(account, day)
+        area_boss = self._area_boss_proof(account, day)
+        foster = execution['kekkai_utilize'] if execution is not None else None
+        result = build_task_completion(config, day, today, proofs=proofs,
+                                     closeout=closeout, labels=labels, now=now,
+                                     courtyard=courtyard, area_boss=area_boss, kekkai_utilize=foster,
+                                     started_tasks=started, planned_today=day == today,
+                                     normal_ends=execution['finished'] if execution is not None else {},
+                                     historical_tasks=historical)
+        if started is None:
+            result['note'] += ' 当天启动日志无法完整读取，相关执行情况待核验。'
+        saved = {row['task']: row for row in archived['tasks']} if archived else {}
+        for index, row in enumerate(result['tasks']):
+            if row['task'] != 'KekkaiUtilize':
+                continue
+            old = saved.get(row['task'])
+            old_count = old.get('completion_count') if old else None
+            old_at = _local_time(old.get('evidence_at')) if old else None
+            fresh_count = row.get('completion_count')
+            if (type(old_count) is int and 0 < old_count <= 1000 and old_at is not None
+                    and old_at.date().isoformat() == day and old_at <= now
+                    and (type(fresh_count) is not int or old_count > fresh_count)):
+                retained = dict(old)
+                retained['status'] = 'unverified'
+                retained['reason'] = f'当日已保存成功寄养 {old_count} 次；当前日志不足以核验完整次数，可能还有遗漏。'
+                retained['status_label'] = f'{old_count}次'
+                result['tasks'][index] = retained
+        if day < today:
+            for index, row in enumerate(result['tasks']):
+                old = saved.get(row['task'])
+                if old and row['task'] != 'KekkaiUtilize' and row['status'] != 'completed' and row['evidence_at'] is None:
+                    result['tasks'][index] = old
+            result['scope'] = 'historical_planned' if archived and archived['planned'] else 'historical_executed'
+            result['note'] = ('展示当日保存的任务清单，并按当日日志更新结束状态。' if archived and archived['planned']
+                              else '该日未保存完整计划清单；目前仅恢复日志中实际启动的任务，未启动任务无法完整还原。')
+            if execution is None:
+                result['note'] += ' 当日日志无法完整读取，当前显示已保存状态。'
+            if archive_error:
+                result['note'] += ' 历史存档无法读取，原文件已保留。'
+            result['counts'] = {key: sum(row['status'] == key for row in result['tasks'])
+                                for key in ('completed', 'incomplete', 'unverified')}
+        else:
+            result['counts'] = {key: sum(row['status'] == key for row in result['tasks'])
+                                for key in ('completed', 'incomplete', 'unverified')}
+        result['service_checklist'] = build_service_checklist(
+            config, day, today, now=now, report=result, proofs=proofs,
+            courtyard=courtyard, area_boss=area_boss, kekkai_utilize=foster,
+            execution=execution, archived=archived.get('service_checklist') if archived else None)
+        if self.history is not None:
+            try:
+                self.history.save(account, day, result, now.isoformat(), planned=day == today)
+            except (OSError, ValueError):
+                result['note'] += ' 任务历史保存失败，本次结果仍可查看。'
+        return result
+
+    def capture_plans(self):
+        # Cheap config snapshots only: no log scan, backend request or account action.
+        if self.history is None:
+            return
+        now = self.now().astimezone(SHANGHAI)
+        day = now.date().isoformat()
+        labels = {}
+        for parts in (('module', 'config', 'i18n', 'zh-CN.json'), ('assets', 'i18n', 'zh-CN.json')):
+            try:
+                labels.update(read_json(checked_path(self.root, *parts)))
+            except (OSError, ValueError):
+                pass
+        for account in self.accounts():
+            try:
+                config = self._config(account)
+                report = build_task_completion(config, day, day, now=now,
+                                               planned_today=True, started_tasks=set(), labels=labels)
+                report['service_checklist'] = build_service_checklist(
+                    config, day, day, now=now, report=report)
+                self.history.save(account, day, report, now.isoformat(), planned=True, plan_only=True)
+            except (OSError, ValueError):
+                continue
+
     def account_day(self, account, day):
         statistics_date(day)
         config = self._config(account)
@@ -302,6 +598,7 @@ class DailyFeedbackReader:
                 'updated_at': timestamp(report.get('updated_at')), 'status': status,
                 'status_label': STATUS_LABELS[status], 'reason': reason,
                 'has_report': bool(report), 'evidence': evidence, 'closeout': closeout,
+                'task_completion': self._task_completion(account, day, config, closeout),
                 'notification': notification,
                 'settings': {'talisman_enabled': talisman_enabled, 'collective_enabled': collective_enabled,
                              'collective_today': collective_today,

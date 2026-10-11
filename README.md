@@ -4,9 +4,19 @@
 
 项目地址：[luchi5/OAS-WebPanel](https://github.com/luchi5/OAS-WebPanel)。配套后端：[luchi5/OnmyojiAutoScript 的 luchi 分支](https://github.com/luchi5/OnmyojiAutoScript/tree/luchi)；桌面前端：[luchi5/OASX](https://github.com/luchi5/OASX)。面板、后端和桌面前端各自独立运行。请先安装并启动后端，面板启动脚本只管理面板及可选 HTTPS 网关。
 
+2026-10-11：同步账号卡片布局、固定每日／每周任务清单、任务历史日期、地域鬼王数量、结界蹭卡次数和庭院事务实际结果。未开启功能显示“未开启”，今日不安排的周常显示“今日无需运行”。普通任务可按脚本正常结束记为完成，详情保留具体依据；缺少可信记录显示“待核验”。历史记录只保存最小任务视图，不保存账号配置或凭据。
+
+## 下载与快速启动
+
+从 [Releases](https://github.com/luchi5/OAS-WebPanel/releases) 下载完整 ZIP 并解压。包内包含网页资源、Python 服务源码和启动脚本。首次使用按下面步骤安装依赖、设置自己的后台路径；之后双击 `start-local.cmd` 即可打开浏览器。完整步骤也见包内 `使用说明.txt`。
+
+网页通过面板服务提供数据与操作接口，默认地址为 `http://127.0.0.1:22300`。不要在压缩包里运行，也不要只打开 HTML 文件。默认需要登录；首次随机密码在本机 `state/initial-login.txt`，登录后修改。Python、OAS 后台和模拟器需另行准备。
+
 ## 安装
 
 使用已经安装的 Python 3.10 或更新版本。建议为面板建立单独的虚拟环境；项目不附带 Python、Caddy 或第三方二进制运行环境。
+
+本次验证使用 Python 3.12。需要安装 Python 时可从 [Python 官方下载页](https://www.python.org/downloads/windows/) 获取。
 
 Windows PowerShell，在项目目录执行：
 
@@ -49,11 +59,15 @@ Copy-Item settings.example.json settings.json
 
 也可以双击 `start-local.cmd`。脚本优先使用 `.venv/Scripts/python.exe`，其次使用 PATH 中的 Python；使用其他环境可传入 `-PythonPath`。`-NoBrowser` 可禁用自动打开浏览器，`-SettingsPath` 可指定配置文件。
 
+如果 Windows 将下载的 PowerShell 文件标记为“来自 Internet”而拒绝执行，确认下载来源后，在本项目目录执行 `Get-ChildItem -File *.ps1 | Unblock-File`，再双击启动脚本。这只解除这些文件的下载标记；详见 [Microsoft 执行策略说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)。
+
 默认本地地址为 `http://127.0.0.1:22300`。直接运行 Python：
 
 ```powershell
 .\.venv\Scripts\python.exe -B app.py --settings settings.json
 ```
+
+每日看板在 `/daily-feedback`，默认显示全部账号。可用 `?accounts=1,2,3` 只展示指定编号；筛选只影响当前浏览器页面，后台账号和调度不变。页面支持日期切换、账号卡片自动换行及向下滚动。历史快照在配置的状态目录下保存；面板未运行时没有记录到的历史开关不会凭当前配置猜测。
 
 通过启动脚本启动的面板，可用下列命令停止：
 

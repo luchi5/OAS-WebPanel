@@ -5,19 +5,19 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#202026">
   <title>OASX / 每日验收</title>
-  <link rel="stylesheet" href="/static/daily-feedback.css?v=20261007">
-  <script src="/static/daily-feedback.js?v=20261007" defer></script>
+  <link rel="stylesheet" href="/static/daily-feedback.css?v=20261011-public-1">
+  <script src="/static/daily-feedback.js?v=20261011-public-1" defer></script>
 </head>
 <body>
   <header class="page-header"><a class="back-link" href="/" aria-label="返回工作台">← 工作台</a><a class="brand" href="/daily-feedback"><img src="/static/assets/oasx.png" width="28" height="28" alt="">每日验收</a><button id="refresh" class="secondary" type="button">刷新</button></header>
   <main>
-    <section class="intro"><div><span class="eyebrow">今日结果，一眼确认</span><h1>账号日常验收</h1><p>花合战今日经验 · 寮集体任务 30 次</p></div><div class="date-control"><button id="previous-day" type="button" aria-label="前一天">‹</button><label class="sr-only" for="report-date">验收日期</label><input id="report-date" type="date"><button id="next-day" type="button" aria-label="后一天">›</button><button id="today" class="secondary" type="button">今天</button></div></section>
+    <section class="intro"><div><span class="eyebrow">今日结果，一眼确认</span><h1>账号日常验收</h1><p>按账号查看每日与每周任务 · 花合战与寮30截图</p></div><div class="date-control"><button id="previous-day" type="button" aria-label="前一天">‹</button><label class="sr-only" for="report-date">验收日期</label><input id="report-date" type="date"><button id="next-day" type="button" aria-label="后一天">›</button><button id="today" class="secondary" type="button">今天</button></div></section>
     <div id="login-notice" class="notice" hidden>当前面板需要登录，请先<a href="/">返回工作台登录</a>。</div>
     <div id="error" class="notice error" role="alert" hidden></div>
-    <section id="summary" class="summary" aria-label="验收概况"></section>
-    <div class="list-heading"><span>需要关注的账号优先显示</span><span id="refresh-time" role="status">正在读取…</span></div>
+    <section id="summary" class="summary" aria-label="截图验收概况"></section>
+    <div class="list-heading"><span>按账号编号排列 · 自动换行，向下滚动查看</span><span id="refresh-time" role="status">正在读取…</span></div>
     <section id="account-list" class="account-list" aria-label="账号验收列表"><div class="empty">正在读取每日验收记录…</div></section>
-    <p class="footnote">截图按账号和日期保存。花合战今日经验用于快速查看活跃进度，不能单独证明每一项任务都已完成；经验可以超过目标，没有可靠画面或数字的项目显示“未核验”。</p>
+    <p class="footnote">每个账号固定列出海报中的13项每日任务和11项每周任务；关闭的功能显示“未开启”，已开启但今日不安排的周常显示“今日无需运行”。尚未完成显示“未完成”，结果无法判断显示“待核验”，详情说明完成依据。结界蹭卡显示当日成功次数，地域鬼王显示已完成数量／目标数量；庭院事务保留“没找到入口”等实际结果。每周项目的状态对应所选当天，不代表整周配额已经打满。午夜后可选择前一天，旧记录未保存的功能开关显示“待核验”。截图只保留花合战和寮30。</p>
   </main>
   <dialog id="detail-dialog" class="detail-dialog"><div class="detail-header"><div><span id="detail-date" class="eyebrow"></span><h2 id="detail-account"></h2></div><button id="detail-close" class="secondary" type="button" aria-label="关闭账号详情">关闭 ✕</button></div><div id="detail-body"></div></dialog>
   <dialog id="image-dialog" class="image-dialog"><div class="image-toolbar"><span id="image-label"></span><a id="image-download" class="secondary" download>保存原图</a><button id="image-close" class="secondary" type="button">关闭 ✕</button></div><img id="image-preview" alt="验收游戏截图"></dialog>

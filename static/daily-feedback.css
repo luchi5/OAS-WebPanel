@@ -5,3 +5,56 @@ dialog { color:var(--ink); background:var(--bg); border:1px solid var(--line); b
 @media(max-width:680px) { .page-header { padding:12px 16px; gap:16px; } .back-link { font-size:12px; } .brand { font-size:16px; gap:7px; } .brand img { width:24px; height:24px; } main { padding:24px 14px 32px; } .intro { display:block; margin-bottom:20px; } h1 { font-size:25px; } .date-control { margin-top:20px; } input[type=date] { flex:1; max-width:none; min-width:0; } .summary { gap:8px; grid-template-columns:repeat(2,1fr); margin-bottom:20px; } .summary-item { padding:12px 14px; } .summary-item strong { font-size:23px; } .list-heading { font-size:11px; } .account-card { grid-template-columns:1fr 1fr; gap:16px 12px; padding:16px; min-height:0; } .account-identity { grid-column:1/-1; display:flex; justify-content:space-between; gap:10px; align-items:center; } .account-name { font-size:16px; margin:0; } .status { flex:none; } .metric-value { font-size:23px; } .metric-time { font-size:11px; } .card-action { display:none; } .detail-dialog { width:calc(100vw - 16px); max-height:calc(100dvh - 20px); border-radius:13px; } .detail-header { padding:16px; } h2 { font-size:18px; } #detail-body { padding:18px 16px; } .detail-status { display:block; } .detail-status p { margin-top:9px; } .evidence-grid { grid-template-columns:1fr; gap:14px; } .image-toolbar { flex-wrap:wrap; padding:10px; font-size:12px; } .image-toolbar .secondary { padding:7px 9px; font-size:12px; } }
 .evidence-info.warning { color:var(--amber); }
 .metric-target { display:block; font-size:11px; color:var(--muted); margin-top:5px; }
+.task-overview { grid-column:1/-1; min-width:0; border-top:1px solid var(--line); padding-top:14px; }
+.task-heading { display:block; font-size:13px; font-weight:600; margin-bottom:9px; }
+.task-counts,.task-chips { display:flex; flex-wrap:wrap; gap:7px; min-width:0; }
+.task-counts { margin:0 0 10px; }
+.task-state { display:inline-block; font-size:11px; line-height:1.5; padding:3px 8px; border-radius:6px; white-space:nowrap; }
+.task-state.completed { color:var(--green); background:#273c34; }
+.task-state.incomplete { color:var(--red); background:#453134; }
+.task-state.unverified { color:var(--amber); background:#42392e; }
+.task-state.disabled { color:var(--muted); background:var(--surface); }
+.task-state.not_scheduled { color:#a3b8cd; background:#29333f; }
+.task-chips,.task-completion .task-list { list-style:none; padding:0; margin:0; }
+.task-chip { display:flex; align-items:center; gap:6px; min-width:0; max-width:100%; padding:4px 6px 4px 9px; background:var(--surface); border-radius:7px; }
+.task-chip-label,.task-name { min-width:0; overflow-wrap:anywhere; }
+.task-chip-label { flex:1; font-size:12px; }
+.task-chip .task-state,.task-line .task-state { flex:none; }
+.task-list { display:grid; gap:8px; }
+.task-item { min-width:0; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+.task-line { display:flex; align-items:flex-start; gap:10px; min-width:0; }
+.task-name { flex:1; font-size:13px; font-weight:600; }
+.detail-section .task-reason,.detail-section .task-time,.task-note { color:var(--muted); font-size:12px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.detail-section .task-reason { margin:7px 0 0; }
+.detail-section .task-time { margin:5px 0 0; font-size:11px; }
+.task-note { margin:8px 0 0; }
+.task-completion { padding-top:0; margin-bottom:20px; }
+.detail-header > div,.account-identity .account-name { min-width:0; overflow-wrap:anywhere; }
+.detail-header > button { flex:none; }
+@media(max-width:680px) { .task-overview { padding-top:12px; } .task-item { padding:11px 12px; } .task-line { gap:8px; } }
+
+/* Account cards flow in numeric order across each row, then down the page. */
+main { max-width:1760px; }
+.page-header { padding-inline:max(20px,calc((100vw - 1720px)/2)); }
+.account-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); gap:16px; align-items:stretch; }
+.account-card { display:flex; flex-direction:column; align-items:stretch; gap:12px; min-width:0; text-align:left; padding:18px; }
+.account-identity { display:flex; flex-direction:column; align-items:flex-start; gap:6px; min-width:0; }
+.account-name { margin:0; font-size:16px; }
+.account-card .metric { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 8px; align-items:center; }
+.account-card .metric-value { font-size:20px; }
+.account-card .metric-time,.account-card .metric-target { grid-column:1/-1; }
+.account-card .card-action { margin-top:auto; text-align:right; }
+.task-group + .task-group { margin-top:14px; }
+.task-group-heading { margin:0 0 7px; font-size:13px; color:var(--purple); }
+.task-chips { display:grid; gap:5px; }
+.task-chip { width:100%; max-width:none; padding:5px 0; background:transparent; border-radius:0; gap:8px; }
+.task-chip-label { font-size:13px; }
+.task-overview .task-counts { gap:5px; }
+.task-overview .task-heading { display:none; }
+.task-group .task-state { margin-left:auto; }
+@media(max-width:680px) {
+  .account-list { grid-template-columns:1fr; gap:14px; }
+  .account-card { padding:16px; }
+  .page-header { padding-inline:16px; }
+  .account-card .card-action { display:block; }
+}

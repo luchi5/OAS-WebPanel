@@ -1,0 +1,34 @@
+OAS 网页面板 · Windows 使用说明
+
+一、准备环境
+先安装并启动配套的 OAS 主脚本后台。网页面板、OAS 后台和模拟器分别运行。
+本面板使用 Python 3.10 或更新版本，本次发布以 Python 3.12 验证。
+下载整个压缩包并解压，在项目文件夹打开 PowerShell，首次执行：
+
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+Copy-Item settings.example.json settings.json
+
+二、填写配置
+用记事本打开 settings.json，将 backend_root 改成你自己的 OAS 文件夹绝对路径，
+例如 C:/Apps/OnmyojiAutoScript。backend_url 填写对应的本机后台地址；默认 http://127.0.0.1:22289。
+保留其余默认值即可在本机使用。
+
+三、启动网页
+双击 start-local.cmd，浏览器自动打开 http://127.0.0.1:22300。
+首次登录账号为 admin，随机初始密码请查看本机 state/initial-login.txt；登录后修改密码。
+之后日常使用只需先启动 OAS 后台，再双击 start-local.cmd，不用重复安装依赖。
+每日看板地址为 http://127.0.0.1:22300/daily-feedback。
+默认显示后台的全部账号；例如只查看 1、2、3 号可打开 /daily-feedback?accounts=1,2,3。
+
+四、常见情况
+只双击 HTML 文件无法使用任务、日志等接口，请通过上述本机地址打开页面。
+面板提示后台离线时，检查 OAS 是否启动、backend_url 和 backend_root 是否指向自己的实例。
+若 Windows 提示下载的 PowerShell 脚本未签名，确认来源后在项目目录执行：
+Get-ChildItem -File *.ps1 | Unblock-File
+手机或外网访问需要额外配置自己的 HTTPS 网关，详细步骤见 README.md。
+停止面板可执行 .\Stop-Panel.ps1；OAS 后台和游戏任务独立管理。
+
+本包不包含 Python、OAS、模拟器、账号配置、日志、证书或私人域名配置。
+项目源码：https://github.com/luchi5/OAS-WebPanel
+许可证与第三方声明见 LICENSE、THIRD_PARTY_NOTICES.md。
