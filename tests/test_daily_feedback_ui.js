@@ -100,9 +100,9 @@ async function verifyRendering() {
   assert.equal(visibleData(all).accounts.length, 12, 'Public default must show all backend accounts');
   const named = {...all, accounts: [{...row(), account: 'oas-alpha'}]};
   assert.equal(visibleData(named).accounts.length, 1, 'Unnumbered accounts are visible by default');
-  const visible = visibleData(all, [1, 2, 3, 4, 5, 6, 7, 8, 10]);
-  assert.deepEqual(visible.accounts.map(item => Number(item.account.slice(0, 2))), [1, 2, 3, 4, 5, 6, 7, 8, 10]);
-  assert.equal(visible.counts.verified, 9, 'Summary counts must only count visible accounts');
+  const visible = visibleData(all, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.deepEqual(visible.accounts.map(item => Number(item.account.slice(0, 2))), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.equal(visible.counts.verified, 11, 'Summary counts must only count visible accounts');
   assert.equal(all.accounts.length, 12, 'Filtering must not remove backend accounts');
   const fixed = {...report(Array.from({length: 24}, (_, index) => ({task: `Fixed${index}`, label: `固定项目${index + 1}`,
     group: index < 13 ? 'daily' : 'weekly', status: index === 0 ? 'disabled' : index === 13 ? 'not_scheduled' : 'incomplete', reason: '合成配置状态'}))), scope: 'poster_checklist'};
