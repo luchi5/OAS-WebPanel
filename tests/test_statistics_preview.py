@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import sys
-import secrets
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,28 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import create_app
 from auth import AuthStore, password_hash
-from tests.test_backend import FakeOas, request
-
-
-class FixtureOas(FakeOas):
-    """Synthetic statistics fixture; independent of local preview tools."""
-    def __init__(self):
-        super().__init__()
-        self.events = []
-        self.streams = []
-
-    async def accounts(self):
-        return ['演示一', '演示二']
-
-    async def statistics_dates(self, account):
-        return {'script_name': account,
-                'dates': ['2026-10-05', '2026-10-04'] if account == '演示一' else []}
-
-    async def statistics_day(self, account, day):
-        return {'script_name': account, 'date': day,
-                'available_metrics': ['total_task_run_count'],
-                'tasks': {'Chess': {'run_count': 1, 'total_duration_seconds': None,
-                                    'runs': [{'status': 'incomplete', 'duration_seconds': None}]}}}
+from dev_tools.preview import FixtureOas, PASSWORD
+from test_backend import request
 
 
 class StatisticsPreviewTests(unittest.IsolatedAsyncioTestCase):
@@ -39,11 +18,10 @@ class StatisticsPreviewTests(unittest.IsolatedAsyncioTestCase):
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
         auth = AuthStore(root / 'state')
-        password = secrets.token_urlsafe(24)
         with auth._db() as database:
             database.execute('UPDATE users SET password_hash=?,must_change=0 WHERE username=?',
-                             (password_hash(password), 'admin'))
-        self.token, _ = auth.authenticate('admin', password)
+                             (password_hash(PASSWORD), 'admin'))
+        self.token, _ = auth.authenticate('admin', PASSWORD)
         self.fixture = FixtureOas()
         settings = {'host': '127.0.0.1', 'port': 22300, 'public_origin': 'https://panel.example.com',
                     'backend_url': 'http://127.0.0.1:22289', 'backend_root': str(root / 'synthetic'),

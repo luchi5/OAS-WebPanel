@@ -1,4 +1,4 @@
-"""Read the configured backend's lightweight statistics without importing its runtime."""
+"""Read the private backend's lightweight statistics without importing its runtime."""
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +16,7 @@ class LocalStatisticsReader:
         root = backend_root.resolve()
         module_path = root / "module" / "server" / "log_stats.py"
         if module_path.resolve().parent != (root / "module" / "server").resolve() or not module_path.is_file():
-            raise RuntimeError("Configured backend statistics module is missing")
+            raise RuntimeError("Private backend statistics module is missing")
         self.root = root
         self.module_path = module_path
         self._lock = threading.RLock()

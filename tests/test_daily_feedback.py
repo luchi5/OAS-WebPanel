@@ -16,7 +16,7 @@ from tests.test_backend import FakeOas, request
 
 DAY = '2026-10-07'
 AT = DAY + 'T21:10:00'
-ACCOUNT = '05-测试'
+ACCOUNT = '05-托管10-20'
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aAvsAAAAASUVORK5CYII=')
 
 
@@ -186,10 +186,10 @@ class ReaderTests(FeedbackFixture, unittest.TestCase):
 
     def test_disabled_accounts_and_weekend_guild_not_red(self):
         self.config('09', talisman=False, collective=False)
-        self.config('01-测试', collective=False)
+        self.config('01-自己', collective=False)
         self.assertEqual(self.reader.account_day('09', DAY)['status'], 'disabled')
-        self.assertEqual(self.reader.account_day('01-测试', DAY)['status'], 'pending')
-        self.assertFalse(self.reader.account_day('01-测试', DAY)['evidence']['collective']['expected'])
+        self.assertEqual(self.reader.account_day('01-自己', DAY)['status'], 'pending')
+        self.assertFalse(self.reader.account_day('01-自己', DAY)['evidence']['collective']['expected'])
         weekend = self.reader.account_day(ACCOUNT, '2026-10-10')
         self.assertFalse(weekend['evidence']['collective']['expected'])
         self.assertNotEqual(weekend['status'], 'attention')

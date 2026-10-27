@@ -16,7 +16,7 @@ assert.equal(metric({expected:true, verified:true, current:25, total:30}, 'colle
 assert.equal(metric({expected:false, verified:false}, 'collective'), '今日无需验收');
 assert.equal(clock(null), '尚未采集');
 assert.equal(clock('2026-10-07T21:10:00+08:00'), '21:10 采集');
-assert.equal(imageUrl('05-测试', '2026-10-07', 'talisman-a.png'), '/api/daily-feedback/05-%E6%B5%8B%E8%AF%95/images/talisman-a.png?date=2026-10-07');
+assert.equal(imageUrl('05-托管10-20', '2026-10-07', 'talisman-a.png'), '/api/daily-feedback/05-%E6%89%98%E7%AE%A110-20/images/talisman-a.png?date=2026-10-07');
 assert.match(localDay(), /^\d{4}-\d{2}-\d{2}$/);
 const source = fs.readFileSync(path.join(__dirname, '../static/daily-feedback.js'), 'utf8');
 assert(!source.includes('innerHTML'), 'Evidence/account labels must render through textContent');
@@ -76,12 +76,13 @@ function row(completion = report(tasks)) {
 }
 function data(account) { return {date: day, today: day, counts: {attention: 0, verified: 1, pending: 0, running: 0, unverified: 0, disabled: 0}, accounts: [account]}; }
 class FixedDate extends Date { constructor(...args) { super(...(args.length ? args : [`${day}T08:00:00Z`])); } }
-function harness(initial, search = `?date=${day}`) {
+function harness(initial) {
   const nodes = Object.fromEntries(ids.map(id => [id, new Element()]));
   const timers = [], calls = [], historyCalls = [];
   let respond = async () => initial;
   const document = {hidden: false, createElement: tag => new Element(tag), getElementById: id => { assert(nodes[id], `Missing DOM node ${id}`); return nodes[id]; }, addEventListener() {}};
-  const context = {document, Intl, Date: FixedDate, URLSearchParams, location: {search},
+  const context = {document, Intl, Date: FixedDate, URLSearchParams, AbortController, setTimeout, clearTimeout,
+    window: {addEventListener() {}}, location: {search: `?date=${day}`},
     history: {replaceState: (...args) => historyCalls.push(args)}, setInterval: (callback, delay) => timers.push({callback, delay}),
     fetch: async (url, options) => { calls.push({url, options}); const value = await respond(); return {ok: true, status: 200, json: async () => value}; }};
   vm.createContext(context); vm.runInContext(source, context);
@@ -96,14 +97,14 @@ async function rendered(account) {
 }
 async function verifyRendering() {
   const {visibleData, taskResult} = require('../static/daily-feedback.js');
-  const all = {...data(row()), accounts: Array.from({length: 12}, (_, index) => ({...row(), account: `${String(index + 1).padStart(2, '0')}-合成账号`}))};
-  assert.equal(visibleData(all).accounts.length, 12, 'Public default must show all backend accounts');
-  const named = {...all, accounts: [{...row(), account: 'oas-alpha'}]};
-  assert.equal(visibleData(named).accounts.length, 1, 'Unnumbered accounts are visible by default');
-  const visible = visibleData(all, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
-  assert.deepEqual(visible.accounts.map(item => Number(item.account.slice(0, 2))), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
-  assert.equal(visible.counts.verified, 11, 'Summary counts must only count visible accounts');
-  assert.equal(all.accounts.length, 12, 'Filtering must not remove backend accounts');
+  assert.equal(taskResult({task:'Chess', status:'not_scheduled', weekly_progress:{value:530, verified:true}}), '530/600');
+  assert.equal(taskResult({task:'Dokan', weekly_progress:{value:2, verified:true}}), '2次');
+  assert.equal(taskResult({task:'SixRealms', weekly_progress:{value:1, verified:false}}), '1次');
+  const all = {...data(row()), accounts: Array.from({length: 15}, (_, index) => ({...row(), account: `${String(index + 1).padStart(2, '0')}-合成账号`}))};
+  const visible = visibleData(all);
+  assert.deepEqual(visible.accounts.map(item => Number(item.account.slice(0, 2))), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+  assert.equal(visible.counts.verified, 14, 'Summary counts must only count visible accounts');
+  assert.equal(all.accounts.length, 15, 'Filtering must not remove backend accounts');
   const fixed = {...report(Array.from({length: 24}, (_, index) => ({task: `Fixed${index}`, label: `固定项目${index + 1}`,
     group: index < 13 ? 'daily' : 'weekly', status: index === 0 ? 'disabled' : index === 13 ? 'not_scheduled' : 'incomplete', reason: '合成配置状态'}))), scope: 'poster_checklist'};
   fixed.tasks[1] = {task: 'KekkaiUtilize', label: '结界蹭卡', group: 'daily', status: 'completed', completion_count: 2, reason: '寄养证据'};
@@ -122,25 +123,21 @@ async function verifyRendering() {
   assert.equal(descendants(fixedUi.nodes['detail-body'], node => node.tagName === 'img').length, 2);
   assert.equal(taskResult({task: 'KekkaiUtilize', status: 'disabled', status_label: '未开启', completion_count: 2}), '未开启');
   const multi = harness(all); await flush();
-  assert.equal(multi.nodes['account-list'].children.length, 12);
+  assert.equal(multi.nodes['account-list'].children.length, 14);
   assert(multi.nodes['account-list'].textContent.includes('09-合成账号'));
   assert(multi.nodes['account-list'].textContent.includes('11-合成账号'));
   assert(multi.nodes['account-list'].textContent.includes('12-合成账号'));
-  const filtered = harness(all, `?date=${day}&accounts=1,2,3,4,5,6,7,8,10`); await flush();
-  assert.equal(filtered.nodes['account-list'].children.length, 9, 'Explicit URL filter retains selected numbered accounts');
-  assert(!filtered.nodes['account-list'].textContent.includes('09-合成账号'));
-  await filtered.nodes['account-list'].children[0].dispatch('click');
-  assert(new URLSearchParams(filtered.historyCalls.at(-1)[2].split('?')[1]).get('accounts') === '1,2,3,4,5,6,7,8,10', 'Opening details must retain account filter in URL');
+  assert(!multi.nodes['account-list'].textContent.includes('15-合成账号'));
   const fixture = row(); const before = JSON.stringify(fixture);
   const ui = await rendered(fixture);
   const card = ui.nodes['account-list'].children[0];
   const detail = ui.nodes['detail-body']; const completion = completionSection(detail);
   assert(card.textContent.includes('截图验收：已核验') && ui.nodes.summary.textContent.includes('截图已核验'), 'Legacy badges and summary must visibly state their screenshot-only scope');
-  for (const status of ['completed', 'incomplete', 'unverified']) {
-    assert.equal(descendants(preview(card), node => hasClass(node, 'task-state') && hasClass(node, status)).length, 2, 'Each status needs its count and its task badge on the card');
-    assert.equal(descendants(completion, node => hasClass(node, 'task-state') && hasClass(node, status)).length, 2, 'Each status needs its count and its task badge in details');
+  for (const status of ['completed', 'unverified']) {
+    assert.equal(descendants(preview(card), node => hasClass(node, 'task-state') && hasClass(node, status)).length, status === 'completed' ? 2 : 3, 'Each status needs its count and its task badge on the card');
+    assert.equal(descendants(completion, node => hasClass(node, 'task-state') && hasClass(node, status)).length, status === 'completed' ? 2 : 3, 'Each status needs its count and its task badge in details');
   }
-  assert(preview(card).textContent.includes('已完成 1') && preview(card).textContent.includes('未完成 1') && preview(card).textContent.includes('待核验 1'));
+  assert(preview(card).textContent.includes('已完成 1') && preview(card).textContent.includes('待核验 2') && preview(card).textContent.includes('待核验 2'));
   assert(!preview(card).textContent.includes('999'), 'Displayed counts must follow normalized tasks');
   assert(completion.textContent.includes('开场超时未执行') && completion.textContent.includes('未记录证据时间'));
   assert(completion.textContent.includes('证据时间：2026-10-08 17:12'));
@@ -162,7 +159,7 @@ async function verifyRendering() {
   const disabledImages = row(); disabledImages.status = 'disabled'; disabledImages.status_label = '未启用';
   const disabledUi = await rendered(disabledImages);
   assert(disabledUi.nodes['account-list'].textContent.includes('截图验收：未启用'));
-  assert(preview(disabledUi.nodes['account-list']).textContent.includes('已完成 1') && preview(disabledUi.nodes['account-list']).textContent.includes('未完成 1'), 'Disabled screenshots cannot hide other enabled tasks');
+  assert(preview(disabledUi.nodes['account-list']).textContent.includes('已完成 1') && preview(disabledUi.nodes['account-list']).textContent.includes('待核验 2'), 'Disabled screenshots cannot hide other enabled tasks');
 
   const unknown = row(report([{task: '<img src=x onerror=alert(1)>', label: '<script>unsafe</script>', status: 'future-status', status_label: '已完成', reason: '<b>未经确认</b>', evidence_at: null}]));
   const unknownUi = await rendered(unknown);
@@ -190,13 +187,13 @@ async function verifyRendering() {
   let resolveRefresh;
   ui.respond(() => new Promise(resolve => { resolveRefresh = resolve; }));
   const refreshing = ui.nodes.refresh.dispatch('click'); await flush();
-  assert(ui.nodes['detail-dialog'].open && completionSection(ui.nodes['detail-body']).textContent.includes('未完成 1'), 'In-flight reads must retain the selected account and previous evidence');
+  assert(ui.nodes['detail-dialog'].open && completionSection(ui.nodes['detail-body']).textContent.includes('待核验 2'), 'In-flight reads must retain the selected account and previous evidence');
   const updated = copy(fixture);
   updated.task_completion.tasks[1] = {...updated.task_completion.tasks[1], status: 'completed', reason: '新增道馆完成记录', evidence_at: `${day}T18:00:00+08:00`};
   resolveRefresh(data(updated)); await refreshing; await flush();
   assert(ui.nodes['detail-dialog'].open && ui.nodes['detail-dialog'].showCount === 1, 'Updating an open account must not reopen or close its dialog');
   const refreshed = completionSection(ui.nodes['detail-body']);
-  assert(refreshed.textContent.includes('已完成 2') && refreshed.textContent.includes('未完成 0') && refreshed.textContent.includes('新增道馆完成记录'));
+  assert(refreshed.textContent.includes('已完成 2') && refreshed.textContent.includes('待开始 0') && refreshed.textContent.includes('新增道馆完成记录'));
   assert(preview(ui.nodes['account-list']).textContent.includes('已完成 2'));
   assert.equal(descendants(ui.nodes['detail-body'], node => node.tagName === 'img').length, 2);
   assert(ui.nodes['image-dialog'].open && ui.nodes['image-preview'].src.includes('talisman.png'), 'Refreshing task states must retain an already open image');

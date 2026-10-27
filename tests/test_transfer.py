@@ -7,7 +7,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.test_backend import FakeOas, request
+from test_backend import FakeOas, request
 from app import create_app
 from auth import AuthStore
 from oas_client import OasClient, UpstreamError, transfer_document, MAX_TRANSFER_BYTES
@@ -137,7 +137,7 @@ class TransferAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('参数范围无效', str(error.exception))
         self.assertIn('chess.run_count', str(error.exception))
 
-    async def test_utf8_multipart_is_bound_to_local_service_and_preserves_data(self):
+    async def test_utf8_multipart_is_fixed_to_private_service_and_preserves_data(self):
         client = OasClient('http://127.0.0.1:22289')
         calls = []
         class Opener:

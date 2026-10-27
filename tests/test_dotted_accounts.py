@@ -16,8 +16,8 @@ from oas_client import OasClient, UpstreamError, account_identifier, identifier
 from statistics_reader import LocalStatisticsReader
 from tests.test_backend import FakeOas, FakeUpstreamSocket, request
 
-DOTTED = '07-测试.7'
-OTHER = '02-测试'
+DOTTED = '07-基础托管至11.7'
+OTHER = '02-托管至10-24'
 INVALID = ('.', '..', '.hidden', 'trailing.', 'a..b', 'a/b', r'a\b', 'a%2fb', 'a%252fb',
            'a:b', 'a?b', 'a#b', 'a b', 'a\nb', 'a\x00b', '', 'a' * 81)
 
@@ -40,7 +40,7 @@ class DottedClient(FakeOas):
 
 class DottedProtocolTests(unittest.IsolatedAsyncioTestCase):
     def test_account_dots_are_separate_from_strict_task_and_field_names(self):
-        for value in (DOTTED, 'abc.1.2', '01-测试', 'account_01'):
+        for value in (DOTTED, 'abc.1.2', '01-自己', 'account_01'):
             self.assertEqual(account_identifier(value), value)
         for value in (*INVALID, None, 7):
             with self.subTest(value=value), self.assertRaises(ValueError):
@@ -227,7 +227,7 @@ class DottedLocalStatisticsTests(unittest.IsolatedAsyncioTestCase):
             root = Path(temporary)
             source = root / 'module' / 'server'
             source.mkdir(parents=True)
-            shutil.copyfile(Path(__file__).resolve().parent / 'fixtures' / 'log_stats.py', source / 'log_stats.py')
+            shutil.copyfile((Path(__file__).resolve().parent / 'fixtures' / 'log_stats.py'), source / 'log_stats.py')
             (source / '__init__.py').write_text("raise RuntimeError('Do not load OAS runtime')", encoding='utf-8')
             (root / 'config').mkdir()
             (root / 'config' / (DOTTED + '.json')).write_text('{}', encoding='utf-8')

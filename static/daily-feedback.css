@@ -11,7 +11,7 @@ dialog { color:var(--ink); background:var(--bg); border:1px solid var(--line); b
 .task-counts { margin:0 0 10px; }
 .task-state { display:inline-block; font-size:11px; line-height:1.5; padding:3px 8px; border-radius:6px; white-space:nowrap; }
 .task-state.completed { color:var(--green); background:#273c34; }
-.task-state.incomplete { color:var(--red); background:#453134; }
+.task-state.pending { color:var(--red); background:#453134; }
 .task-state.unverified { color:var(--amber); background:#42392e; }
 .task-state.disabled { color:var(--muted); background:var(--surface); }
 .task-state.not_scheduled { color:#a3b8cd; background:#29333f; }

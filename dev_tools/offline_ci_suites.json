@@ -1,0 +1,138 @@
+{
+  "project": "OAS-WebPanel",
+  "suites": [
+    {
+      "path": "tests/test_backend.py",
+      "required": true,
+      "scope": "Temporary auth/database, ASGI requests and isolated loopback WebSocket fixtures"
+    },
+    {
+      "path": "tests/test_atomic_settings.py",
+      "scope": "Fake upstream atomic setting conflicts; no live writes",
+      "required": true
+    },
+    {
+      "path": "tests/test_transfer.py",
+      "required": true,
+      "scope": "Synthetic config transfers through fake upstream"
+    },
+    {
+      "path": "tests/test_task_enable_api.py",
+      "required": true,
+      "scope": "Fake account enable/disable API calls"
+    },
+    {
+      "path": "tests/test_task_wait_api.py",
+      "scope": "Fake waiting-time updates and conflict checks",
+      "required": true
+    },
+    {
+      "path": "tests/test_no_login.py",
+      "required": true,
+      "scope": "Temporary sessions and fake backend anonymous access"
+    },
+    {
+      "path": "tests/test_dotted_accounts.py",
+      "required": true,
+      "scope": "Synthetic account names, protocol and local temporary logs"
+    },
+    {
+      "path": "tests/test_statistics_reader.py",
+      "required": true,
+      "scope": "Temporary statistics logs and ASGI fixtures"
+    },
+    {
+      "path": "tests/test_statistics_preview.py",
+      "required": true,
+      "scope": "ASGI and synthetic preview data; preview server is not started"
+    },
+    {
+      "path": "tests/test_daily_feedback.py",
+      "required": true,
+      "scope": "Temporary evidence images/reports and fake ASGI backend"
+    },
+    {
+      "path": "tests/test_feedback_cache.py",
+      "scope": "Temporary files, clock and concurrent readers only",
+      "required": true
+    },
+    {
+      "path": "tests/test_task_completion_reader.py",
+      "required": true,
+      "scope": "Pure synthetic task completion records"
+    },
+    {
+      "path": "tests/test_task_completion_integration.py",
+      "required": true,
+      "scope": "Temporary task logs and independent proof fixtures"
+    },
+    {
+      "path": "tests/test_service_checklist.py",
+      "required": true,
+      "scope": "Pure synthetic service completion evidence"
+    },
+    {
+      "path": "tests/test_panel_supervisor.py",
+      "required": true,
+      "scope": "Fake services/processes and uniquely named test mutexes only"
+    },
+    {
+      "path": "tests/test_gateway_guard.py",
+      "scope": "Fake gateway processes, clocks, ports and Windows handles",
+      "required": true
+    },
+    {
+      "path": "tests/test_task_evidence_status.py",
+      "scope": "Public checkout synthetic task evidence records"
+    },
+    {
+      "path": "tests/test_settings.py",
+      "scope": "Public checkout temporary settings and origin validation"
+    },
+    {
+      "path": "tests/test_daily_feedback_ui.js",
+      "required": true,
+      "scope": "Fake DOM and synthetic dashboard responses"
+    },
+    {
+      "path": "tests/test_error_accounts_ui.js",
+      "required": true,
+      "scope": "Fake account errors and stale request races"
+    },
+    {
+      "path": "tests/test_live_refresh_ui.js",
+      "required": true,
+      "scope": "Fake clocks, snapshots and WebSocket revisions"
+    },
+    {
+      "path": "tests/test_network_deadlines_ui.js",
+      "scope": "Fake pending network, timers and uncertain-write readback",
+      "required": true
+    },
+    {
+      "path": "tests/test_quick_run_ui.js",
+      "required": true,
+      "scope": "Fake quick-run actions; no game task starts"
+    },
+    {
+      "path": "tests/test_statistics_ui.js",
+      "required": true,
+      "scope": "Synthetic statistics and request races"
+    },
+    {
+      "path": "tests/test_task_toggle_ui.js",
+      "required": true,
+      "scope": "Fake task enable requests and account changes"
+    },
+    {
+      "path": "tests/test_transfer_ui.js",
+      "required": true,
+      "scope": "Fake import/export and temporary in-memory files"
+    },
+    {
+      "path": "tests/test_wait_time_picker_ui.js",
+      "scope": "Fake waiting-time dialog and user input",
+      "required": true
+    }
+  ]
+}

@@ -64,7 +64,7 @@ class FakeOas:
         assert account == "oas1" and task == "Chess"
         return copy.deepcopy(self.values)
 
-    async def set_value(self, account, task, group, argument, value, kind):
+    async def set_value(self, account, task, group, argument, value, kind, *, expected_value=None):
         self.writes.append((account, task, group, argument, value, kind))
         for row in self.values[group]:
             if row["name"] == argument:
@@ -379,8 +379,8 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_save_requires_matching_readback(self):
         self.ready()
-        async def ignore_save(*args):
-            pass
+        async def ignore_save(*args, expected_value):
+            self.assertEqual(expected_value, 1)
         self.client.set_value = ignore_save
         status, data, _ = await self.call("PUT", "/api/accounts/oas1/settings/Chess/chess_config/run_count", {"value": 2, "expected_value": 1})
         self.assertEqual(status, 409)

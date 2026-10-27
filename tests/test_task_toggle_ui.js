@@ -30,8 +30,9 @@ const context = {
 vm.createContext(context);
 function load(first, last) { const begin = source.indexOf(first), end = source.indexOf(last, begin); assert(begin >= 0 && end > begin); vm.runInContext(source.slice(begin, end), context); }
 load('  function scheduleItems(', '  function showWorkTab(');
+load('  function canWaitTaskNow(', '  async function openScheduleSettings(');
 load('  async function stageTaskEnabled(', '  async function selectTask(');
-const task = 'DuelBet', account = '05-测试';
+const task = 'DuelBet', account = '05-托管10-20';
 function snapshot(running = '', queued = true) {
   return { connected: true, state: 1, schedule: { running: running ? { name: running } : {}, pending: [], waiting: queued ? [{ name: task, next_run: '2026-10-07 17:00:00' }] : [] } };
 }

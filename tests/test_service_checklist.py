@@ -33,11 +33,31 @@ def rows(report):
 class ServiceChecklistTests(unittest.TestCase):
     def test_fixed_order_and_all_poster_rows(self):
         result = checklist()
-        self.assertEqual(len(result['tasks']), 24)
+        self.assertEqual(len(result['tasks']), 25)
         self.assertEqual([r['label'] for r in result['tasks'][:5]], ['悬赏封印', '结界蹭卡', '结界挂卡', '个人突破', '地域鬼王'])
-        self.assertEqual(sum(r['group'] == 'daily' for r in result['tasks']), 13)
+        self.assertEqual(sum(r['group'] == 'daily' for r in result['tasks']), 14)
         self.assertEqual(sum(r['group'] == 'weekly' for r in result['tasks']), 11)
-        self.assertEqual(rows(result)['WantedQuests']['status'], 'incomplete')
+        self.assertEqual(rows(result)['WantedQuests']['status'], 'pending')
+
+    def test_started_failure_is_unverified_even_if_next_run_is_future(self):
+        result = rows(checklist(execution={'started': {'WantedQuests'}, 'finished': {}},
+                     report={'tasks': [{'task':'WantedQuests','status':'incomplete',
+                              'status_label':'未完成','reason':'运行报错','evidence_at':None}]}))
+        self.assertEqual(result['WantedQuests']['status'], 'unverified')
+        self.assertEqual(result['AutoCheckinBigGod']['status'], 'pending')
+
+    def test_unstarted_observed_task_is_pending(self):
+        result = rows(checklist(report={'tasks': [{'task':'WantedQuests','status':'incomplete',
+                              'status_label':'未完成','reason':'等待','evidence_at':None}]}))
+        self.assertEqual(result['WantedQuests']['status'], 'pending')
+
+    def test_legacy_checklist_retains_rows_and_adds_unknown_god_sign(self):
+        old = checklist()
+        old['tasks'] = [row for row in old['tasks'] if row['task'] != 'AutoCheckinBigGod']
+        upgraded = validate_checklist(old, DATE)
+        self.assertEqual(len(upgraded['tasks']), 25)
+        self.assertEqual(rows(upgraded)['AutoCheckinBigGod']['status'], 'unverified')
+        self.assertEqual(rows(upgraded)['WantedQuests']['status'], 'pending')
 
     def test_disabled_subfeatures_and_shared_hunt_calendar(self):
         settings = config()
@@ -96,7 +116,7 @@ class ServiceChecklistTests(unittest.TestCase):
             old = build_service_checklist(config(), DATE, '2026-10-11', now=NOW + timedelta(days=1),
                  report={'tasks': []}, archived=saved)
             self.assertEqual(rows(old)['WantedQuests']['status_label'], '未开启')
-            self.assertEqual(len(old['tasks']), 24)
+            self.assertEqual(len(old['tasks']), 25)
             unknown = build_service_checklist(settings, DATE, '2026-10-11', now=NOW + timedelta(days=1), report={'tasks': []})
             self.assertEqual(rows(unknown)['WantedQuests']['status'], 'unverified')
 
@@ -121,6 +141,6 @@ class ServiceIntegrationTests(FeedbackFixture, unittest.TestCase):
 
     def test_reader_serves_fixed_disabled_rows_without_backend_actions(self):
         result = self.reader.account_day(ACCOUNT, DAY)['task_completion']['service_checklist']
-        self.assertEqual(len(result['tasks']), 24)
+        self.assertEqual(len(result['tasks']), 25)
         self.assertEqual(rows(result)['WantedQuests']['status_label'], '未开启')
         self.assertEqual(result['date'], DAY)

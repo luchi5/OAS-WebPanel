@@ -6,11 +6,14 @@ offline and malformed/stale evidence is never interpreted as zero or success.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone, timedelta
+from collections import OrderedDict
+from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
 import re
 import stat
+from threading import RLock
 
 from oas_client import account_identifier, statistics_date, ACCOUNT_IDENTIFIER
 from task_completion_reader import build_task_completion, _local_time
@@ -112,6 +115,36 @@ class DailyFeedbackReader:
         self.root = Path(backend_root)
         self.history = TaskHistory(history_root) if history_root is not None else None
         self.now = now or (lambda: datetime.now(SHANGHAI))
+        # Cache only pure log parsing, never configuration, sidecars or report
+        # decisions. All accesses still validate the path and current identity.
+        self._log_cache = OrderedDict()
+        self._log_cache_lock = RLock()
+
+    def _cached_log(self, kind, account, day, parse):
+        path = checked_path(self.root, 'log', day + '_' + account + '.txt')
+        key = (kind, str(path), account, day)
+        def signature():
+            info = path.stat()
+            return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        with self._log_cache_lock:
+            before = signature()
+            now = self.now().astimezone(SHANGHAI)
+            previous = self._log_cache.get(key)
+            if previous is not None:
+                identity, observed_at, expires_at, result = previous
+                if (identity == before and now >= observed_at
+                        and (expires_at is None or now < expires_at)):
+                    self._log_cache.move_to_end(key)
+                    return deepcopy(result)
+                del self._log_cache[key]
+            result, expires_at = parse(path, now)
+            # An append, replacement or truncation during the read must not
+            # make its partial snapshot reusable by a later request.
+            if before == signature():
+                self._log_cache[key] = (before, now, expires_at, deepcopy(result))
+                while len(self._log_cache) > 128:
+                    self._log_cache.popitem(last=False)
+            return result
 
     def today(self):
         return self.now().astimezone(SHANGHAI).date().isoformat()
@@ -261,18 +294,24 @@ class DailyFeedbackReader:
                 sidecar = proof
         except (OSError, ValueError):
             pass
-        # Legacy same-day attempts have no sidecar. Only a complete task
-        # segment with explicit page/claim evidence can provide a fallback.
         try:
-            path = checked_path(self.root, 'log', day + '_' + account + '.txt')
-            with path.open('rb') as stream:
-                size = path.stat().st_size
-                stream.seek(max(0, size - MAX_JSON))
-                if size > MAX_JSON:
-                    stream.readline()
-                text = stream.read(MAX_JSON).decode('utf-8', errors='replace')
+            result = self._cached_log('courtyard', account, day,
+                                     lambda path, now: (self._courtyard_log(account, day, path), None))
         except (OSError, ValueError):
             return sidecar
+        if result is not None and result['outcome'] == 'completed':
+            return result
+        return sidecar if sidecar is not None else result
+
+    def _courtyard_log(self, account, day, path):
+        # Legacy same-day attempts have no sidecar. Only a complete task
+        # segment with explicit page/claim evidence can provide a fallback.
+        with path.open('rb') as stream:
+            size = path.stat().st_size
+            stream.seek(max(0, size - MAX_JSON))
+            if size > MAX_JSON:
+                stream.readline()
+            text = stream.read(MAX_JSON).decode('utf-8', errors='replace')
         active = False
         result = None
         main = note = missing = done = after_main = intervening_click = False
@@ -320,9 +359,7 @@ class DailyFeedbackReader:
                     result = candidate
             elif source == 'script.py' and message.startswith('Scheduler: Start task `'):
                 active = False
-        if result is not None and result['outcome'] == 'completed':
-            return result
-        return sidecar if sidecar is not None else result
+        return result
 
     def _area_boss_proof(self, account, day):
         try:
@@ -338,14 +375,8 @@ class DailyFeedbackReader:
         # An End line also follows some handled failures: pair it with a start
         # and reject errors, recovery requests and worker boundaries.
         try:
-            path = checked_path(self.root, 'log', day + '_' + account + '.txt')
-            with path.open('rb') as stream:
-                size = path.stat().st_size
-                if size > 32 * 1024 * 1024:
-                    return None
-                raw = stream.read(size)
-                if len(raw) != size:
-                    return None
+            return self._cached_log('execution', account, day,
+                                    lambda path, now: self._execution_log(account, day, path, now))
         except FeedbackNotFound as exc:
             if isinstance(exc.__cause__, FileNotFoundError):
                 return {'started': set(), 'finished': {}, 'kekkai_utilize': {
@@ -354,15 +385,24 @@ class DailyFeedbackReader:
             return None
         except OSError:
             return None
+
+    def _execution_log(self, account, day, path, now):
+        with path.open('rb') as stream:
+            size = path.stat().st_size
+            if size > 32 * 1024 * 1024:
+                return None, None
+            raw = stream.read(size)
+            if len(raw) != size:
+                return None, None
         started, finished = set(), {}
         active = None
         failed = False
         foster_stage = None
         foster_events = {}
-        now = self.now().astimezone(SHANGHAI)
+        next_event = None
         for line in raw.split(b'\n')[:-1]:
             if len(line) > 65536:
-                return None
+                return None, None
             text = line.decode('utf-8-sig', errors='replace').rstrip('\r')
             match = re.fullmatch(
                 r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)\s*\|\s*([A-Za-z_][A-Za-z0-9_]*\.py):\d+\s*\|\s*(INFO|WARNING|ERROR|CRITICAL|DEBUG)\s*\|\s*(.*?)\s*', text)
@@ -373,6 +413,7 @@ class DailyFeedbackReader:
             except ValueError:
                 continue
             if stamp > now:
+                next_event = min(next_event, stamp) if next_event else stamp
                 continue
             source, level, message = match.group(2, 3, 4)
             if (source == 'script.py' and message.startswith('Start scheduler loop:')
@@ -421,12 +462,12 @@ class DailyFeedbackReader:
                                 foster_events[began.isoformat()] = stamp
                             foster_stage = None
         if len(foster_events) > 1000:
-            return None
+            return None, next_event
         last = max(foster_events.values()) if foster_events else None
         return {'started': started, 'finished': finished, 'kekkai_utilize': {
             'schema_version': 1, 'source': 'kekkai_utilize_log_v1',
             'task': 'KekkaiUtilize', 'date': day, 'count': len(foster_events),
-            'at': last.isoformat(timespec='seconds') if last else None}}
+            'at': last.isoformat(timespec='seconds') if last else None}}, next_event
 
     def _started_tasks(self, account, day):
         execution = self._task_execution(account, day)
@@ -511,6 +552,11 @@ class DailyFeedbackReader:
             config, day, today, now=now, report=result, proofs=proofs,
             courtyard=courtyard, area_boss=area_boss, kekkai_utilize=foster,
             execution=execution, archived=archived.get('service_checklist') if archived else None)
+        from weekly_metrics import read_weekly
+        weekly = read_weekly(self.root, account, day, self.history, proofs)
+        for row in result['service_checklist']['tasks']:
+            if row['task'] in weekly:
+                row['weekly_progress'] = weekly[row['task']]
         if self.history is not None:
             try:
                 self.history.save(account, day, result, now.isoformat(), planned=day == today)
@@ -615,8 +661,13 @@ class DailyFeedbackReader:
 
     def image(self, account, day, image):
         statistics_date(day)
-        row = self.account_day(account, day)
-        if image not in {item['image'] for item in row['evidence'].values() if item['status'] == 'captured'}:
+        self._config(account)
+        report, _ = self._report(account, day)
+        raw = report.get('evidence', {})
+        raw = raw if isinstance(raw, dict) else {}
+        evidence = [self._evidence(account, day, kind, raw.get(kind), False)
+                    for kind in ('talisman', 'collective')]
+        if image not in {item['image'] for item in evidence if item['status'] == 'captured'}:
             raise FeedbackNotFound('图片不属于这份验收记录')
         path = self._image_path(account, day, image)
         with path.open('rb') as stream:

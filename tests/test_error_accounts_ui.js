@@ -16,7 +16,7 @@ class Node {
 }
 const nodes = new Map();
 const $ = (id) => { if (!nodes.has(id)) nodes.set(id, new Node()); return nodes.get(id); };
-const state = { authenticated: true, account: '01-测试', accountEpoch: 1, bootEpoch: 1, errorEpoch: 0, taskEpoch: 0,
+const state = { authenticated: true, account: '01-自己', accountEpoch: 1, bootEpoch: 1, errorEpoch: 0, taskEpoch: 0,
   errors: [], errorDetail: null, snapshots: new Map(), reconnectAttempt: 0 };
 const requests = [], toasts = [];
 const context = {
@@ -49,8 +49,8 @@ async function switchTo(account) {
 async function verify() {
   const oldList = context.loadErrors();
   const first = nextRequest('/api/errors?');
-  assert.equal(new URL(first.url, context.window.location.href).searchParams.get('config'), '01-测试');
-  state.errors = [record('old', '01-测试')]; state.errorDetail = { log: 'old account log' };
+  assert.equal(new URL(first.url, context.window.location.href).searchParams.get('config'), '01-自己');
+  state.errors = [record('old', '01-自己')]; state.errorDetail = { log: 'old account log' };
   $('error-log').textContent = 'old account log'; $('error-images').append(new Node('img'));
   $('image-dialog').open = true; $('image-preview').src = 'old account image';
   await switchTo('02');
@@ -60,30 +60,30 @@ async function verify() {
   assert.equal($('image-preview').src, undefined, 'A previous full-screen screenshot must be cleared');
   const second = nextRequest('/api/errors?');
   assert.equal(new URL(second.url, context.window.location.href).searchParams.get('config'), '02');
-  second.resolve({ records: [record('new', '02'), record('foreign', '01-测试')], scope: '全部配置' }); await flush();
-  first.resolve({ records: [record('old', '01-测试')] }); await oldList;
+  second.resolve({ records: [record('new', '02'), record('foreign', '01-自己')], scope: '全部配置' }); await flush();
+  first.resolve({ records: [record('old', '01-自己')] }); await oldList;
   assert.equal(state.errors.length, 1); assert.equal(state.errors[0].id, 'new');
   assert.equal($('errors-scope').textContent, '02', 'The toolbar must name the selected account');
 
   const oldDetail = context.openError('new'); const detailRequest = nextRequest('/api/errors/new?');
-  await switchTo('01-测试');
+  await switchTo('01-自己');
   nextRequest('/api/errors?').resolve({ records: [] }); await flush();
   detailRequest.resolve({ ...record('new', '02'), log: 'foreign late log', images: [] }); await oldDetail;
   assert.equal(state.errorDetail, null); assert.equal($('error-log').textContent, '');
   assert.equal($('error-detail').hidden, true, 'A late previous-account detail must not reopen its panel');
 
   const selectedDetail = context.openError('one'); const selectedRequest = nextRequest('/api/errors/one?');
-  assert.equal(new URL(selectedRequest.url, context.window.location.href).searchParams.get('config'), '01-测试');
-  selectedRequest.resolve({ ...record('one', '01-测试'), log: 'selected log', images: [{ name: 'screen.png', url: '/api/errors/one/images/screen.png' }] }); await selectedDetail;
+  assert.equal(new URL(selectedRequest.url, context.window.location.href).searchParams.get('config'), '01-自己');
+  selectedRequest.resolve({ ...record('one', '01-自己'), log: 'selected log', images: [{ name: 'screen.png', url: '/api/errors/one/images/screen.png' }] }); await selectedDetail;
   const wrap = $('error-images').children[0], image = wrap.children[0].children[0];
-  assert.equal(new URL(image.src).searchParams.get('config'), '01-测试', 'Image display/download must carry the exact account');
+  assert.equal(new URL(image.src).searchParams.get('config'), '01-自己', 'Image display/download must carry the exact account');
   assert.equal(wrap.children[1].href, image.src);
   const oldImageButton = wrap.children[0];
   state.accountEpoch++; state.account = '02'; context.resetErrors();
   oldImageButton.listeners.click(); assert.equal($('image-dialog').open, false, 'Detached old screenshot controls must not reopen');
 
   const staleFailure = context.openError('failing'); const failure = nextRequest('/api/errors/failing?');
-  state.accountEpoch++; state.account = '01-测试'; context.resetErrors();
+  state.accountEpoch++; state.account = '01-自己'; context.resetErrors();
   failure.reject(new Error('old account error')); await staleFailure;
   assert.equal(toasts.length, 0); assert.equal($('error-log').textContent, '');
 

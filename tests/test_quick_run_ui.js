@@ -33,7 +33,7 @@ load('  function scheduleItems(', '  function showWorkTab(');
 load('  function canRunTaskNow(', '  async function openScheduleSettings(');
 load('  function applySession(', '  function storeSnapshot(');
 load('  function openPassword(', '  function showActivity(');
-const task = 'DailyTrifles', account = '02-测试';
+const task = 'DailyTrifles', account = '02-托管至10-24';
 function snapshot(value = 1, running = '') { return { connected: true, state: value, schedule: { running: running ? { name: running } : {}, pending: [], waiting: [{ name: task, next_run: '2099-01-01 00:00:00' }] } }; }
 function settings(enabled = true) { return { scheduler: [{ name: 'enable', type: 'boolean', value: enabled }, { name: 'next_run', type: 'date_time', value: '2099-01-01 00:00:00' }] }; }
 function reset(value = 1, running = '') {
@@ -50,6 +50,23 @@ const assertQueue = () => {
   assert(new Date(call.body.value.replace(' ', 'T') + '+08:00').getTime() < Date.now() - 23 * 3600000);
 };
 async function verify() {
+  context.chooseWaitTime = async () => '2026-10-13 09:00:00';
+  reset();
+  context.renderTasks();
+  const clockButton = $('task-list').children[0].children.at(-1).children[1];
+  await clockButton.listeners.click();
+  assert.equal(writes().length, 1); assert(writes()[0].url.endsWith('/settings/DailyTrifles/scheduler/next_run'));
+  assert.equal(writes()[0].method, 'PUT'); assert.equal(writes()[0].body.value, '2026-10-13 09:00:00'); assert.equal(writes()[0].body.expected_value, '2099-01-01 00:00:00');
+  assert(notices.at(-1)[0].includes('已调整为等待')); assert.equal(state.actionBusy, false);
+  reset(); dirty = true; await context.waitTaskNow(task); assert.equal(writes().length, 0);
+  reset(); responder = async () => {state.account = '03'; return settings();};
+  await context.waitTaskNow(task); assert.equal(writes().length, 0);
+  reset(); responder = async url => {if (url.endsWith('/next_run')) throw new Error('排程已改变'); return settings();};
+  await context.waitTaskNow(task); assert(notices.at(-1)[0].includes('排程已改变'));
+
+  reset(); context.chooseWaitTime = async () => null; await context.waitTaskNow(task); assert.equal(writes().length, 0); assert.equal(state.actionBusy, false);
+  reset(); context.chooseWaitTime = async () => { state.accountEpoch++; return '2026-10-13 09:00:00'; }; await context.waitTaskNow(task); assert.equal(writes().length, 0);
+
   reset(); let button = lightning(); assert.equal(button.disabled, false, 'An idle running account must allow the lightning button');
   await button.listeners.click(); assertQueue(); assert.equal(writes().length, 1); assert(notices.at(-1)[0].includes('后台将自动执行')); assert.equal(state.actionBusy, false);
 

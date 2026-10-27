@@ -2,21 +2,20 @@
   'use strict';
   const labels = {talisman: '花合战今日经验', collective: '寮集体任务'};
   const taskLabels = {Dokan: '道馆', CollectiveMissions: '寮集体任务', AbyssShadows: '峡间暗域', GuildBanquet: '寮宴会', DemonRetreat: '首领退治'};
-  const outcomeLabels = {expired: '等待开场超时', failed: '执行失败', skipped: '已跳过', unconfirmed: '未核验', blocked_by_dokan: '道馆未完成，联动任务未执行'};
+  const outcomeLabels = {expired: '等待开场超时', failed: '执行失败', skipped: '已跳过', unconfirmed: '未核验', blocked_by_dokan: '道馆待核验，联动任务未执行'};
   const notificationLabels = {pending: '尚未发送', sending: '正在发送', accepted: '推送服务已接收', failed: '推送失败', disabled: '未启用推送'};
-  const completionLabels = {completed: '已完成', incomplete: '未完成', unverified: '待核验', disabled: '未开启', not_scheduled: '今日无需运行'};
-  function visibleData(data, selectedAccounts = []) {
-    const visibleAccounts = new Set(selectedAccounts.filter(value => Number.isInteger(value) && value > 0 && value <= 999));
-    if (!visibleAccounts.size) return data;
+  const completionLabels = {completed: '已完成', pending: '待开始', unverified: '待核验', disabled: '未开启', not_scheduled: '今日无需运行'};
+  const visibleAccounts = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+  function visibleData(data) {
     const accounts = data.accounts.filter(row => {
-      const match = /^(\d{1,3})(?:[-_\s]|$)/.exec(row.account);
+      const match = /^(\d{1,2})(?:[-_\s]|$)/.exec(row.account);
       return match && visibleAccounts.has(Number(match[1]));
     });
     const counts = Object.fromEntries(['attention', 'verified', 'pending', 'running', 'unverified', 'disabled'].map(status =>
       [status, accounts.filter(row => row.status === status).length]));
     return {...data, accounts, counts};
   }
-  const state = {day: '', today: '', data: null, selected: null, loading: false, detailSignature: '', accountNumbers: [], requestId: 0};
+  const state = {day: '', today: '', data: null, selected: null, loading: false, detailSignature: '', requestId: 0, request: null};
   function localDay() {
     const parts = new Intl.DateTimeFormat('en', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'}).formatToParts(new Date());
     return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type).value).join('-');
@@ -60,11 +59,13 @@
     const tasks = source.tasks.map((entry, index) => {
       const item = entry && typeof entry === 'object' ? entry : {};
       const task = displayText(item.task, `任务 ${index + 1}`);
-      const status = typeof item.status === 'string' && Object.prototype.hasOwnProperty.call(completionLabels, item.status) ? item.status : 'unverified';
+      const legacyStatus = item.status === 'incomplete' ? 'unverified' : item.status;
+      const status = typeof legacyStatus === 'string' && Object.prototype.hasOwnProperty.call(completionLabels, legacyStatus) ? legacyStatus : 'unverified';
       counts[status]++;
       return {task, group: item.group === 'weekly' ? 'weekly' : 'daily', label: displayText(item.label, Object.prototype.hasOwnProperty.call(taskLabels, task) ? taskLabels[task] : task), status,
         status_label: task === 'CourtyardAffairs' && status === 'unverified' &&
           ['没找到入口', '已无可领取', '未确认完成'].includes(item.status_label) ? item.status_label : completionLabels[status], reason: displayText(item.reason, '未提供核验说明'),
+        weekly_progress: item.weekly_progress || null,
         evidence_at: displayText(item.evidence_at) || null,
         completion_count: task === 'KekkaiUtilize' && Number.isInteger(item.completion_count) && item.completion_count >= 0 && item.completion_count <= 1000 ? item.completion_count : null};
     });
@@ -83,13 +84,19 @@
   }
   const weeklyTasks = new Set(['Dokan', 'WeeklyTrifles']);
   function taskResult(item) {
-    if (item.status === 'disabled' || item.status === 'not_scheduled') return item.status_label;
+    const weekly = item.weekly_progress;
+    if (weekly && ['SixRealms', 'Chess', 'Dokan', 'Kirin', 'AbyssShadows', 'Netherworld'].includes(item.task)) {
+      const value = Number.isInteger(weekly.value) && weekly.value >= 0 ? weekly.value : null;
+      const label = item.task === 'Chess' ? `${value === null ? '—' : value}/600` : `${value === null ? '—' : value}次`;
+      return label;
+    }
+    if (item.status === 'disabled' || item.status === 'not_scheduled' || item.status === 'pending') return item.status_label;
     if (item.task === 'KekkaiUtilize') {
-      return Number.isInteger(item.completion_count) ? `${item.completion_count}次${item.status === 'unverified' ? ' · 待核验' : ''}` : '待核验';
+      return Number.isInteger(item.completion_count) ? `${item.completion_count}次` : '待核验';
     }
     if (item.task === 'AreaBoss') {
       const match = /(?:已成功处理|已核验)\s+(\d{1,3})\/([1-3])\s*只/.exec(item.reason);
-      if (match) return `${match[1]}/${match[2]}${item.status === 'unverified' ? ' · 待核验' : ''}`;
+      if (match) return `${match[1]}/${match[2]}`;
     }
     return item.status_label;
   }
@@ -107,7 +114,7 @@
       return section;
     }
     const counts = element('div', 'task-counts');
-    Object.keys(completionLabels).filter(status => report.scope === 'poster_checklist' ? report.counts[status] : ['completed', 'incomplete', 'unverified'].includes(status)).forEach(status => counts.append(element('span', `task-state ${status}`, `${completionLabels[status]} ${report.counts[status]}`)));
+    Object.keys(completionLabels).filter(status => report.scope === 'poster_checklist' ? report.counts[status] : ['completed', 'pending', 'unverified'].includes(status)).forEach(status => counts.append(element('span', `task-state ${status}`, `${completionLabels[status]} ${report.counts[status]}`)));
     if (detailed || report.scope !== 'poster_checklist') section.append(counts);
     const poster = report.scope === 'poster_checklist';
     const isWeekly = item => poster ? item.group === 'weekly' : weeklyTasks.has(item.task);
@@ -228,7 +235,7 @@
     if (row.closeout.completed.length) closeout.append(element('p', '', `已核实活动结果：${row.closeout.completed.map(task => taskLabels[task] || task).join('、')}`));
     if (row.closeout.incomplete.length) {
       const list = element('ul');
-      row.closeout.incomplete.forEach(item => list.append(element('li', 'warning', `${item.label}：${outcomeLabels[item.outcome] || '未完成'}`)));
+      row.closeout.incomplete.forEach(item => list.append(element('li', 'warning', `${item.label}：${outcomeLabels[item.outcome] || '待核验'}`)));
       closeout.append(list);
     }
     if (row.settings.talisman_enabled && !row.settings.dynamic_closeout_enabled) closeout.append(element('p', 'warning', '动态收尾尚未启用，花合战将按现有排程执行。'));
@@ -251,22 +258,43 @@
   function updateUrl() {
     const params = new URLSearchParams({date: state.day});
     if (state.selected) params.set('account', state.selected);
-    if (state.accountNumbers.length) params.set('accounts', state.accountNumbers.join(','));
     history.replaceState(null, '', `/daily-feedback?${params}`);
+  }
+  async function requestReport(day, signal, timeoutMs = 15000) {
+    const controller = new AbortController();
+    let timer, cancel;
+    const deadline = new Promise((resolve, reject) => {
+      cancel = () => { const error = new Error('请求已取消。'); error.name = 'AbortError'; reject(error); controller.abort(); };
+      timer = setTimeout(() => { reject(new Error('读取超时，请检查网络后刷新。')); controller.abort(); }, timeoutMs);
+      if (signal.aborted) cancel(); else signal.addEventListener('abort', cancel, {once: true});
+    });
+    try {
+      return await Promise.race([deadline, (async () => {
+        const response = await fetch(`/api/daily-feedback?date=${encodeURIComponent(day)}`, {credentials: 'same-origin', cache: 'no-store', signal: controller.signal});
+        const data = response.status === 401 ? null : await response.json();
+        return {response, data};
+      })()]);
+    } finally { clearTimeout(timer); signal.removeEventListener('abort', cancel); }
+  }
+  function cancelRefresh() {
+    ++state.requestId;
+    state.request?.abort(); state.request = null; state.loading = false;
+    document.getElementById('refresh').disabled = false;
   }
   async function refresh() {
     if (state.loading) return;
     state.loading = true;
     const requestId = ++state.requestId;
     const day = state.day;
+    const request = new AbortController(); state.request = request;
     document.getElementById('refresh').disabled = true;
     try {
-      const response = await fetch(`/api/daily-feedback?date=${encodeURIComponent(day)}`, {credentials: 'same-origin', cache: 'no-store'});
+      let {response, data} = await requestReport(day, request.signal);
+      if (requestId !== state.requestId || day !== state.day) return;
       if (response.status === 401) { document.getElementById('login-notice').hidden = false; return; }
-      let data = await response.json();
       if (!response.ok) throw new Error(data.detail || '读取验收记录失败');
       if (requestId !== state.requestId || day !== state.day) return;
-      data = visibleData(data, state.accountNumbers);
+      data = visibleData(data);
       state.data = data;
       state.today = data.today;
       document.getElementById('error').hidden = true;
@@ -282,17 +310,20 @@
         else if (!row) document.getElementById('detail-dialog').close();
       }
     } catch (error) {
+      if (requestId !== state.requestId || day !== state.day || error.name === 'AbortError') return;
       const notice = document.getElementById('error');
       notice.textContent = error.message || '读取失败，请稍后刷新。';
       notice.hidden = false;
     } finally {
-      state.loading = false;
-      document.getElementById('refresh').disabled = false;
-      if (day !== state.day) refresh();
+      if (requestId === state.requestId) {
+        state.loading = false; state.request = null;
+        document.getElementById('refresh').disabled = false;
+      }
     }
   }
   function setDay(day) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day > state.today) return;
+    cancelRefresh();
     state.day = day;
     state.selected = null;
     state.detailSignature = '';
@@ -312,7 +343,6 @@
     const requestedDay = params.get('date');
     state.day = requestedDay && /^\d{4}-\d{2}-\d{2}$/.test(requestedDay) && requestedDay <= state.today ? requestedDay : state.today;
     state.selected = params.get('account');
-    state.accountNumbers = (params.get('accounts') || '').split(',').slice(0, 100).map(Number).filter(value => Number.isInteger(value) && value > 0 && value <= 999);
     document.getElementById('report-date').value = state.day;
     document.getElementById('report-date').max = state.today;
     document.getElementById('report-date').addEventListener('change', event => setDay(event.target.value));
@@ -324,7 +354,8 @@
     document.getElementById('detail-dialog').addEventListener('close', () => { state.selected = null; state.detailSignature = ''; updateUrl(); });
     document.getElementById('image-close').addEventListener('click', () => document.getElementById('image-dialog').close());
     document.getElementById('image-dialog').addEventListener('close', () => { document.getElementById('image-preview').removeAttribute('src'); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) cancelRefresh(); else refresh(); });
+    window.addEventListener('pagehide', cancelRefresh);
     setInterval(() => { if (!document.hidden) refresh(); }, 30000);
     refresh();
   }

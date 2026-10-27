@@ -20,6 +20,7 @@ IDENTIFIER = re.compile(r"^[A-Za-z0-9_\-\u3400-\u9fff]{1,80}$")
 # empty segments, trailing Windows dots, separators, escapes or percent encoding.
 ACCOUNT_IDENTIFIER = re.compile(r"^(?=.{1,80}$)[A-Za-z0-9_\-\u3400-\u9fff]+(?:\.[A-Za-z0-9_\-\u3400-\u9fff]+)*$")
 MAX_JSON_BYTES = 4 * 1024 * 1024
+EXPECTED_UNSET = object()
 
 
 class UpstreamError(Exception):
@@ -108,6 +109,7 @@ def local_backend_url(value: str = "http://127.0.0.1:22289") -> str:
     return f"http://{host}:{port}"
 
 
+
 class OasClient:
     def __init__(self, base_url: str):
         self.base_url = local_backend_url(base_url)
@@ -128,6 +130,10 @@ class OasClient:
                     return json.loads(raw)
             except UpstreamError:
                 raise
+            except urllib.error.HTTPError as exc:
+                if exc.code == 409:
+                    raise UpstreamError('此设置已在其他界面改变，请刷新后再修改', 409) from exc
+                raise UpstreamError('OAS 后端拒绝了请求，请刷新检查') from exc
             except (OSError, ValueError, urllib.error.URLError) as exc:
                 raise UpstreamError("无法连接 OAS 后端或后端返回无效数据") from exc
         return await asyncio.to_thread(work)
@@ -158,7 +164,7 @@ class OasClient:
                     return result
             except urllib.error.HTTPError as exc:
                 if exc.code == 404:
-                    raise UpstreamError('后台尚未加载备份接口；任务结束后重新打开OAS 后端X 再试', 503) from exc
+                    raise UpstreamError('后台尚未加载备份接口；任务结束后重新打开OASX 再试', 503) from exc
                 try:
                     value = json.loads(exc.read(8192))
                     detail = value.get('detail') if isinstance(value, dict) else None
@@ -242,7 +248,8 @@ class OasClient:
             raise UpstreamError("后端设置格式无效")
         return result
 
-    async def set_value(self, account: str, task: str, group: str, argument: str, value, kind: str):
+    async def set_value(self, account: str, task: str, group: str, argument: str, value, kind: str,
+                        *, expected_value=EXPECTED_UNSET):
         parts = (account_identifier(account), identifier(task), identifier(group), identifier(argument))
         path = "/" + "/".join(urllib.parse.quote(part, safe="") for part in parts) + "/value"
         wire_kind = "string" if kind in {"enum", "multi_line", "multi_enum"} else kind
@@ -254,9 +261,21 @@ class OasClient:
         wire_value = ("true" if value else "false") if isinstance(value, bool) else str(value)
         if kind == 'multi_enum':
             wire_value = json.dumps(value, ensure_ascii=False)
-        result = await self._json(path, method="PUT", query={"types": wire_kind, "value": wire_value})
+        query = {"types": wire_kind, "value": wire_value}
+        if expected_value is not EXPECTED_UNSET:
+            query['expected_value'] = json.dumps(expected_value, ensure_ascii=False, allow_nan=False)
+        result = await self._json(path, method="PUT", query=query)
         if result is not True:
             raise UpstreamError("OAS 未确认保存该设置")
+
+    async def wait_task(self, account: str, task: str, *, expected_value=EXPECTED_UNSET):
+        parts = (account_identifier(account), identifier(task))
+        path = '/' + '/'.join(urllib.parse.quote(part, safe='') for part in parts) + '/sync_next_run'
+        query = {'target_dt': ''}
+        if expected_value is not EXPECTED_UNSET:
+            query['expected_value'] = json.dumps(expected_value, ensure_ascii=False, allow_nan=False)
+        if await self._json(path, method='PUT', query=query) is not True:
+            raise UpstreamError('OAS 未确认任务进入等待，请刷新排程检查')
 
     @asynccontextmanager
     async def connection(self, account: str):

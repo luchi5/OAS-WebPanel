@@ -108,6 +108,8 @@ class LifecycleCoordinator:
         self._record("starting" if action == "start" else "stopping")
         try:
             getattr(self.controller, action)()
+            if action == 'start' and not self.controller.running():
+                raise OSError('Panel or gateway did not become ready')
         except Exception:
             self.retry_at = now + self.retry_delay
             # Deliberately omit exception text: subprocesses may include settings.
@@ -132,6 +134,8 @@ class WindowsProcesses:
         self.kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         self.kernel.OpenProcess.restype = wintypes.HANDLE
         self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self.kernel.TerminateProcess.restype = wintypes.BOOL
         self.kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
         self.kernel.WaitForSingleObject.restype = wintypes.DWORD
         self.kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
@@ -225,6 +229,37 @@ class WindowsProcesses:
             return [pointer[index] for index in range(count.value)]
         finally:
             self.kernel.LocalFree(pointer)
+
+    def terminate_verified(self, identity: BackendIdentity, executable: str):
+        # Keep one handle for identity validation and termination. A recycled
+        # PID cannot redirect this operation to a replacement process.
+        handle = self.kernel.OpenProcess(0x1000 | 0x100000 | 0x0001, False, identity.pid)
+        if not handle:
+            if ctypes.get_last_error() in (87, 1168):
+                return
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            if self.kernel.WaitForSingleObject(handle, 0) == 0:
+                return
+            times = [wintypes.FILETIME() for _ in range(4)]
+            if not self.kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            birth = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+            length = wintypes.DWORD(32768)
+            image = ctypes.create_unicode_buffer(length.value)
+            if not self.kernel.QueryFullProcessImageNameW(handle, 0, image, ctypes.byref(length)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if birth != identity.created or Path(image.value) != Path(executable):
+                raise RuntimeError('Gateway process identity changed')
+            if not self.kernel.TerminateProcess(handle, 1):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if self.kernel.WaitForSingleObject(handle, 3000) != 0:
+                raise RuntimeError('Gateway did not exit')
+        finally:
+            self.kernel.CloseHandle(handle)
+
+
+is_private_backend = is_configured_backend
 
 
 class BackendProbe:

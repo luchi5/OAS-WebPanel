@@ -10,6 +10,7 @@ SERVICE_TASKS = (
     ('KekkaiActivation', 'kekkai_activation', 'KekkaiActivation', '结界挂卡', 'daily'),
     ('RealmRaid', 'realm_raid', 'RealmRaid', '个人突破', 'daily'),
     ('AreaBoss', 'area_boss', 'AreaBoss', '地域鬼王', 'daily'),
+    ('AutoCheckinBigGod', 'auto_checkin_big_god', 'AutoCheckinBigGod', '大神签到', 'daily'),
     ('DailySign', 'restart', 'Restart', '每日签到', 'daily'),
     ('Delegation', 'delegation', 'Delegation', '式神委派', 'daily'),
     ('CourtyardAffairs', 'courtyard_affairs', 'CourtyardAffairs', '庭院事务', 'daily'),
@@ -30,7 +31,7 @@ SERVICE_TASKS = (
     ('SixRealms', 'six_realms', 'SixRealms', '六道之门', 'weekly'),
     ('Secret', 'secret', 'Secret', '秘闻竞速／百战', 'weekly'),
 )
-LABELS = {'completed': '已完成', 'incomplete': '未完成', 'unverified': '待核验',
+LABELS = {'completed': '已完成', 'incomplete': '待核验', 'pending': '待开始', 'unverified': '待核验',
           'disabled': '未开启', 'not_scheduled': '今日无需运行'}
 WEEKDAYS = {f'星期{x}': i for i, x in enumerate('一二三四五六日')}
 
@@ -70,6 +71,15 @@ def validate_checklist(value, day):
     if not isinstance(value, dict) or value.get('date') != day or value.get('scope') != 'poster_checklist':
         raise ValueError('Checklist identity invalid')
     tasks = value.get('tasks')
+    # Upgrade the previously saved 24-row checklist without losing history.
+    legacy = [spec for spec in SERVICE_TASKS if spec[0] != 'AutoCheckinBigGod']
+    if isinstance(tasks, list) and len(tasks) == len(legacy) and all(
+            isinstance(row, dict) and row.get('task') == spec[0]
+            for row, spec in zip(tasks, legacy)):
+        tasks = list(tasks)
+        tasks.insert(5, {'task': 'AutoCheckinBigGod', 'label': '大神签到', 'group': 'daily',
+                        'status': 'unverified', 'status_label': '待核验',
+                        'reason': '旧记录未保存大神签到状态。', 'evidence_at': None})
     if not isinstance(tasks, list) or len(tasks) != len(SERVICE_TASKS):
         raise ValueError('Checklist tasks invalid')
     cleaned = []
@@ -80,6 +90,8 @@ def validate_checklist(value, day):
         if status not in LABELS:
             raise ValueError('Checklist status invalid')
         item = dict(row)
+        if status == 'incomplete':
+            item.update(status='unverified', status_label='待核验')
         for key, limit in (('label', 120), ('status_label', 120), ('reason', 1000)):
             if not isinstance(item.get(key), str) or len(item[key]) > limit:
                 raise ValueError('Checklist text invalid')
@@ -157,5 +169,15 @@ def build_service_checklist(config, day, today, *, now, report, proofs=None,
                 row.update(prior)
             if task == 'PetSoul' and '未单独核验小动物助战是否触发' not in row['reason']:
                 row['reason'] += ' 此项复用御魂任务结果，未单独核验小动物助战是否触发。'
+        if row['status'] in ('incomplete', 'unverified'):
+            if (current and config and _enabled(task, options) and execution is not None
+                    and source not in started and row['evidence_at'] is None
+                    and source not in outcomes):
+                next_run = _local_time(_mapping(options.get('scheduler')).get('next_run'))
+                row.update(status='pending', status_label='待开始',
+                           reason=('尚未到计划执行时间。' if next_run and next_run > now
+                                   else '尚未记录到任务启动，等待调度执行。'))
+            elif row['status'] == 'incomplete':
+                row.update(status='unverified', status_label='待核验')
         rows.append(row)
     return validate_checklist({'scope': 'poster_checklist', 'date': day, 'tasks': rows}, day)

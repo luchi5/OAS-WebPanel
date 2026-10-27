@@ -4,7 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const state = {
     csrf: '', username: '', authenticated: false, mustChangePassword: false, loginRequired: true,
-    backendOnline: false, backendName: 'OAS 后端', domain: '',
+    backendOnline: false, backendName: '私库 OAS', domain: '',
     accounts: [], labels: {}, menu: [], snapshots: new Map(), snapshotVersions: new Map(),
     snapshotRefresh: { epoch: 0, timer: null, request: null, busy: false, cursor: 0, full: false },
     account: '', accountEpoch: 0, task: '', taskEpoch: 0, category: '', taskScope: 'schedule',
@@ -156,32 +156,81 @@
     } finally { if (epoch === transfer.epoch) transferBusy(false); }
   }
 
+  async function requestJson(path, options = {}, timeoutMs = 15000) {
+    if (options.signal?.aborted) { const error = new Error('请求已取消。'); error.name = 'AbortError'; throw error; }
+    const controller = new AbortController();
+    let timer, cancel;
+    const deadline = new Promise((resolve, reject) => {
+      cancel = () => { const error = new Error('请求已取消。'); error.name = 'AbortError'; reject(error); controller.abort(); };
+      timer = setTimeout(() => { const error = new Error('请求超时，请检查网络后刷新。'); error.name = 'TimeoutError'; reject(error); controller.abort(); }, timeoutMs);
+      if (options.signal?.aborted) cancel();
+      else options.signal?.addEventListener('abort', cancel, {once: true});
+    });
+    try {
+      return await Promise.race([deadline, (async () => {
+        const response = await fetch(path, {...options, signal: controller.signal});
+        let data = null;
+        if (response.status !== 204) {
+          try { data = await response.json(); }
+          catch (error) { if (response.ok) throw error; }
+        }
+        return {response, data};
+      })()]);
+    } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel); }
+  }
+
+  async function confirmUncertainWrite(path, options, error) {
+    // A timeout cannot establish whether the server saved the change. Read
+    // the frozen target once, with a separate deadline; never resend a write.
+    const setting = /^(.+\/settings\/[^/]+)\/([^/]+)\/([^/]+)$/.exec(path);
+    const action = /^(.+\/accounts\/[^/]+)\/actions$/.exec(path);
+    const importedTask = /^(.*\/accounts\/[^/]+)\/tasks\/([^/]+)\/import$/.exec(path);
+    let readPath = setting ? setting[1] : action ? `${action[1]}/snapshot`
+      : importedTask ? `${importedTask[1]}/settings/${importedTask[2]}` : path === '/api/config/import' ? '/api/bootstrap' : '/api/session';
+    error.uncertain = true;
+    error.message = '请求未能确认结果，已尝试回读核实；请刷新检查，勿重复提交。';
+    try {
+      const data = await api(readPath, {timeoutMs: 5000, signal: options.signal});
+      if (setting) {
+        const current = data?.[decodeURIComponent(setting[2])]?.find(item => item.name === decodeURIComponent(setting[3]));
+        if (current && equal(current.value, options.body?.value)) return {ok: true, value: current.value, confirmed_by_readback: true};
+        error.message = '请求结果未确认；回读尚未看到目标值，请稍后刷新检查，勿重复提交。';
+      } else if (action && data?.connected && data.state === (options.body?.action === 'start' ? 1 : 0)) {
+        return {ok: true, state: data.state, confirmed_by_readback: true};
+      }
+    } catch (_) { /* The original write remains uncertain. */ }
+    throw error;
+  }
+
   async function api(path, options = {}) {
     const method = options.method || 'GET';
+    const writing = method !== 'GET' && method !== 'HEAD';
+    const bootEpoch = state.bootEpoch;
+    options = {...options, body: options.body === undefined ? undefined : clone(options.body)};
     const headers = { Accept: 'application/json' };
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
     if (method !== 'GET' && method !== 'HEAD' && state.csrf) headers['X-CSRF-Token'] = state.csrf;
-    let response;
+    let response, data;
     try {
-      response = await fetch(path, {
+      ({response, data} = await requestJson(path, {
         method, headers, credentials: 'same-origin', cache: 'no-store',
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: options.signal,
-      });
+      }, options.timeoutMs || 15000));
     } catch (error) {
       if (error.name === 'AbortError') throw error;
-      throw new ApiError('连接失败，请检查网络后重试。');
-    }
-    let data = null;
-    if (response.status !== 204) {
-      try { data = await response.json(); } catch (_) { /* Handled below for unsuccessful responses. */ }
+      const failure = new ApiError(error.name === 'TimeoutError' ? error.message : '连接失败，请检查网络后刷新。');
+      if (writing) return confirmUncertainWrite(path, options, failure);
+      throw failure;
     }
     if (!response.ok) {
-      if (response.status === 401 && path !== '/api/login') resetSession();
+      if (response.status === 401 && path !== '/api/login' && bootEpoch === state.bootEpoch) resetSession();
       const message = responseMessage(data, response.status === 409
         ? '内容或状态已改变，请刷新后重试。'
         : response.status === 401 ? '登录已失效，请重新登录。' : `请求未成功（${response.status}），请重试。`);
-      throw new ApiError(message, response.status);
+      const failure = new ApiError(message, response.status);
+      if (writing && response.status >= 500) return confirmUncertainWrite(path, options, failure);
+      throw failure;
     }
     return data;
   }
@@ -383,7 +432,7 @@
     state.accounts = (data.accounts || []).map((name) => String(name));
     state.labels = data.labels || {};
     state.menu = normaliseMenu(data.menu);
-    state.backendName = data.backend_name || 'OAS 后端'; state.domain = data.domain || '';
+    state.backendName = data.backend_name || '私库 OAS'; state.domain = data.domain || '';
     state.backendOnline = Boolean(data.backend_online);
     $('backend-name').textContent = state.backendName;
     $('backend-domain').textContent = state.domain;
@@ -688,9 +737,9 @@
       if (status.time) info.append(el('span', 'task-meta', status.time)); button.append(info); button.addEventListener('click', () => selectTask(entry.name)); row.append(button);
       const actions = el('div', 'task-actions');
       const quick = iconButton('flash', taskIsEnabled(entry.name, schedule) ? `${taskLabel(entry.name)} 立即执行` : `${taskLabel(entry.name)}：请先启用该任务`, () => runTaskNow(entry.name));
-      const clock = iconButton('clock', `${taskLabel(entry.name)} 调整运行时间`, () => openScheduleSettings(entry.name));
+      const clock = iconButton('clock', `${taskLabel(entry.name)} 调整等待时间`, () => waitTaskNow(entry.name));
       quick.disabled = !canRunTaskNow(entry.name);
-      clock.disabled = ['Script', 'GlobalGame'].includes(entry.name) || state.mustChangePassword;
+      clock.disabled = !canWaitTaskNow(entry.name);
       actions.append(quick, clock, iconButton('tune', `${taskLabel(entry.name)} 参数设置`, () => selectTask(entry.name))); row.append(actions); return row;
     };
     if (state.taskScope === 'schedule') {
@@ -786,6 +835,68 @@
         state.actionBusy = false; renderSelectedAccount(); renderTasks(); syncSnapshotVisibility({ force: true, full: true });
       }
     }
+  }
+
+  function canWaitTaskNow(task) {
+    const snapshot = state.snapshots.get(state.account);
+    return Boolean(state.authenticated && state.account && state.backendOnline && snapshot?.connected
+      && [0, 1].includes(snapshot.state) && !state.actionBusy && !state.saving && !state.mustChangePassword
+      && !['Script', 'GlobalGame'].includes(task) && state.menu.some(entry => entry.name === task));
+  }
+
+  async function waitTaskNow(task) {
+    if (!canWaitTaskNow(task)) return;
+    if (dirtyFields().length) { toast('当前参数尚未保存，请先保存或放弃修改。', 'error'); showWorkTab('settings'); return; }
+    const account = state.account, accountEpoch = state.accountEpoch, bootEpoch = state.bootEpoch, taskEpoch = state.taskEpoch;
+    const current = () => state.authenticated && state.account === account && state.accountEpoch === accountEpoch && state.bootEpoch === bootEpoch;
+    stopSnapshotRefresh(); state.actionBusy = true; renderSelectedAccount(); renderTasks();
+    try {
+      const settings = await api(`/api/accounts/${encoder(account)}/settings/${encoder(task)}`);
+      if (!current()) return;
+      const next = settings?.scheduler?.find(item => item.name === 'next_run');
+      if (!next || typeof next.value !== 'string' || readOnly(next)) throw new Error('这个任务没有可修改的等待时间。');
+      const target = await chooseWaitTime(task, next.value);
+      if (!current() || target === null) return;
+      const result = await api(`/api/accounts/${encoder(account)}/settings/${encoder(task)}/scheduler/next_run`, {
+        method: 'PUT', body: {value: target, expected_value: next.value},
+      });
+      if (!current()) return;
+      if (result?.ok !== true || result.value !== target) throw new Error('未确认等待排程，请刷新检查。');
+      toast(`「${taskLabel(task)}」已调整为等待，下次运行：${result.value}。`);
+      if (state.task === task && state.taskEpoch === taskEpoch && !dirtyFields().length && !state.loadingSettings) await selectTask(task, true);
+    } catch (error) { if (current()) toast(error.message, 'error'); }
+    finally {
+      if (state.bootEpoch === bootEpoch) {
+        state.actionBusy = false; renderSelectedAccount(); renderTasks(); syncSnapshotVisibility({force: true, full: true});
+      }
+    }
+  }
+
+  function chooseWaitTime(task, value) {
+    return new Promise(resolve => {
+      const dialog = el('dialog', 'dialog'), form = el('form');
+      const title = el('h2', '', `${taskLabel(task)} · 等待时间`);
+      const hint = el('p', 'muted', '选择下次运行日期和时间（北京时间）。');
+      const label = el('label', '', '等待到'); label.htmlFor = 'task-wait-time';
+      const input = el('input'); input.id = 'task-wait-time'; input.type = 'datetime-local';
+      input.required = true; input.step = '1'; input.value = value.replace(' ', 'T');
+      input.style.maxWidth = '100%'; input.style.boxSizing = 'border-box';
+      const actions = el('div', 'dialog-actions');
+      const cancel = el('button', 'button', '取消'); cancel.type = 'button';
+      const save = el('button', 'button primary', '保存时间'); save.type = 'submit';
+      let selected = null;
+      cancel.addEventListener('click', () => dialog.close());
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        selected = input.value.replace('T', ' ');
+        if (selected.length === 16) selected += ':00';
+        dialog.close();
+      });
+      dialog.addEventListener('close', () => { dialog.remove(); resolve(selected); }, {once: true});
+      actions.append(cancel, save); form.append(title, hint, label, input, actions);
+      dialog.append(form); document.body.append(dialog); dialog.showModal(); input.focus();
+    });
   }
 
   async function openScheduleSettings(task) {
@@ -1083,7 +1194,7 @@
       }
     }
     if (failure) {
-      toast(`${saved ? `已保存 ${saved} 项；` : ''}${failure.message}`, 'error', failure.status === 409 ? undefined : saveSettings);
+      toast(`${saved ? `已保存 ${saved} 项；` : ''}${failure.message}`, 'error', failure.status === 409 || failure.uncertain ? undefined : saveSettings);
     } else if (saved) {
       $('save-status').textContent = `已保存 ${saved} 项修改`; toast('参数已保存。');
     }

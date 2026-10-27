@@ -31,11 +31,21 @@ class CompletionIntegrationTests(FeedbackFixture, unittest.TestCase):
     def row(self):
         return self.reader.account_day(ACCOUNT, DAY)
 
+    def started_task(self, task, day=DAY):
+        directory = self.root / 'log'
+        directory.mkdir(exist_ok=True)
+        (directory / (day + '_' + ACCOUNT + '.txt')).write_text(
+            f'{day} 20:00:00 | script.py:1 | INFO | Scheduler: Start task `{task}`\n',
+            encoding='utf-8')
+
     def test_reads_independent_proof_and_only_enabled_other_tasks(self):
         path = self.root / 'config' / (ACCOUNT + '.json')
         config = json.loads(path.read_text(encoding='utf-8'))
-        config['daily_trifles'] = {'scheduler': {'enable': True, 'next_run': DAY + 'T21:30:00'}}
+        config['daily_trifles'] = {'scheduler': {'enable': True, 'next_run': '2099-01-01T00:00:00'}}
         path.write_text(json.dumps(config), encoding='utf-8')
+        # A future next_run alone is not today's plan. A real start today keeps
+        # this task in today's execution scope even after it is rescheduled.
+        self.started_task('DailyTrifles')
         self.save_proof()
         labels = self.root / 'assets' / 'i18n'
         labels.mkdir(parents=True)
@@ -44,13 +54,24 @@ class CompletionIntegrationTests(FeedbackFixture, unittest.TestCase):
         tasks = {item['task']: item for item in row['task_completion']['tasks']}
         self.assertEqual(set(tasks), {'Dokan', 'DailyTrifles'})
         self.assertEqual(tasks['Dokan']['status_label'], '已完成')
-        self.assertEqual(tasks['DailyTrifles']['status_label'], '未完成')
+        self.assertEqual(tasks['DailyTrifles']['status_label'], '待核验')
         self.assertEqual(tasks['DailyTrifles']['label'], '每日琐事')
-        self.assertEqual(row['task_completion']['counts'], {'completed': 1, 'incomplete': 1, 'unverified': 0})
+        self.assertEqual(row['task_completion']['counts'], {'completed': 1, 'incomplete': 0, 'unverified': 1})
         self.assertEqual(set(row['evidence']), {'talisman', 'collective'})
         self.assertTrue(row['evidence']['collective']['complete'])
         self.assertNotIn('PROOF-SECRET', json.dumps(row))
         self.assertNotIn('DO-NOT-EXPOSE', json.dumps(row))
+
+    def test_future_enabled_task_without_today_start_is_excluded(self):
+        path = self.root / 'config' / (ACCOUNT + '.json')
+        config = json.loads(path.read_text(encoding='utf-8'))
+        config['daily_trifles'] = {'scheduler': {'enable': True, 'next_run': '2099-01-01T00:00:00'}}
+        path.write_text(json.dumps(config), encoding='utf-8')
+        self.save_proof()
+        row = self.row()
+        self.assertEqual([item['task'] for item in row['task_completion']['tasks']], ['Dokan'])
+        self.assertEqual(row['task_completion']['counts'], {'completed': 1, 'incomplete': 0, 'unverified': 0})
+        self.assertTrue(row['evidence']['collective']['complete'])
 
     def test_report_success_does_not_make_other_tasks_complete(self):
         row = self.row()
@@ -88,24 +109,32 @@ class CompletionIntegrationTests(FeedbackFixture, unittest.TestCase):
 
     def test_history_does_not_use_current_enabled_task_scope(self):
         self.save_proof()
-        logs = self.root / 'log'
-        logs.mkdir(exist_ok=True)
-        (logs / (DAY + '_' + ACCOUNT + '.txt')).write_text(
-            DAY + ' 20:00:00.000 | script.py:0001 | INFO | Scheduler: Start task `Dokan`\n'
-            + DAY + ' 21:00:00.000 | script.py:0001 | INFO | Scheduler: End task `Dokan`\n',
-            encoding='utf-8')
+        self.reader.now = lambda: datetime(2026, 10, 8, 22, tzinfo=timezone(timedelta(hours=8)))
+        row = self.row()
+        # An empty recovered execution scope is available as an empty view; it
+        # must not borrow today's enabled Dokan entry or infer a full plan.
+        self.assertTrue(row['task_completion']['available'])
+        self.assertEqual(row['task_completion']['scope'], 'historical_executed')
+        self.assertEqual(row['task_completion']['tasks'], [])
+        self.assertEqual(row['task_completion']['counts'], {'completed': 0, 'incomplete': 0, 'unverified': 0})
+        self.assertTrue(row['evidence']['collective']['complete'])
+
+    def test_history_restores_started_task_even_when_current_enabled_scope_differs(self):
+        self.save_proof()
+        self.started_task('DailyTrifles')
         path = self.root / 'config' / (ACCOUNT + '.json')
         config = json.loads(path.read_text(encoding='utf-8'))
-        config['dokan']['scheduler']['enable'] = False
-        config['daily_trifles'] = {'scheduler': {'enable': True, 'next_run': '2026-10-08T18:00:00'}}
+        config['daily_trifles'] = {'scheduler': {'enable': False}}
+        self.assertTrue(config['dokan']['scheduler']['enable'])
         path.write_text(json.dumps(config), encoding='utf-8')
         self.reader.now = lambda: datetime(2026, 10, 8, 22, tzinfo=timezone(timedelta(hours=8)))
         row = self.row()
-        self.assertTrue(row['task_completion']['available'])
-        self.assertEqual(row['task_completion']['scope'], 'historical_executed')
-        self.assertEqual([item['task'] for item in row['task_completion']['tasks']], ['Dokan'])
-        self.assertEqual(row['task_completion']['tasks'][0]['status'], 'completed')
-        self.assertEqual(row['task_completion']['counts'], {'completed': 1, 'incomplete': 0, 'unverified': 0})
+        completion = row['task_completion']
+        self.assertTrue(completion['available'])
+        self.assertEqual(completion['scope'], 'historical_executed')
+        self.assertEqual([item['task'] for item in completion['tasks']], ['DailyTrifles'])
+        self.assertEqual(completion['tasks'][0]['status'], 'unverified')
+        self.assertEqual(completion['counts'], {'completed': 0, 'incomplete': 0, 'unverified': 1})
         self.assertTrue(row['evidence']['collective']['complete'])
 
 
@@ -122,15 +151,6 @@ class CompletionApiTests(FeedbackFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.oas.actions, [])
         self.assertEqual(self.oas.writes, [])
         self.temp.cleanup()
-
-    async def test_task_history_uses_the_injected_auth_state_directory(self):
-        status, _, _ = await request(self.app, 'GET', '/api/daily-feedback/' + ACCOUNT, query={'date': DAY})
-        self.assertEqual(status, 200)
-        snapshots = list((self.root / 'state' / 'task_history' / DAY).glob('*.json'))
-        self.assertEqual(len(snapshots), 1, 'Each test/backend must use its own authentication state directory for history')
-        snapshot = json.loads(snapshots[0].read_text(encoding='utf-8'))
-        self.assertEqual(snapshot['account'], ACCOUNT)
-        self.assertNotIn('DO-NOT-EXPOSE', json.dumps(snapshot))
 
     async def test_day_and_account_routes_include_same_conservative_completion_view(self):
         day = datetime.now(timezone(timedelta(hours=8))).date().isoformat()

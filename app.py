@@ -322,7 +322,7 @@ def validate_value(field: dict, value):
             match = re.fullmatch(r"(\d{2}) ([0-2]\d):([0-5]\d):([0-5]\d)", value)
             valid = bool(match and int(match[1]) <= 31 and int(match[2]) <= 23)
             if not valid:
-                raise HTTPException(422, "时间间隔需为 DD HH:mm:ss，当前OAS 后端仅支持此面板写入 00–31 天")
+                raise HTTPException(422, "时间间隔需为 DD HH:mm:ss，当前主仓库仅支持此面板写入 00–31 天")
     else:
         raise HTTPException(422, "此字段类型暂不支持网页修改")
     if not valid:
@@ -341,7 +341,7 @@ def validate_value(field: dict, value):
 def reject_ambiguous_string(value: str):
     """Don't let mainline's unconditional coercion corrupt a text field."""
     if value in {"true", "false"}:
-        raise HTTPException(422, "OAS 后端会自动转换此文字为布尔值，此文字字段暂不能保存该值")
+        raise HTTPException(422, "主仓库会自动转换此文字为布尔值，此文字字段暂不能保存该值")
     formats = {8: "%H:%M:%S", 11: "%d %H:%M:%S", 19: "%Y-%m-%d %H:%M:%S"}
     fmt = formats.get(len(value))
     if fmt:
@@ -349,11 +349,11 @@ def reject_ambiguous_string(value: str):
             datetime.strptime(value, fmt)
         except ValueError:
             return
-        raise HTTPException(422, "OAS 后端会自动转换此文字为时间，此文字字段暂不能保存该值")
+        raise HTTPException(422, "主仓库会自动转换此文字为时间，此文字字段暂不能保存该值")
 
 
 def create_app(settings: dict, *, client=None, auth=None, statistics=None) -> FastAPI:
-    app = FastAPI(title="OAS 网页面板", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="OAS 私人面板", docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(OriginGuard, settings=settings)
     store = auth or AuthStore(Path(settings.get("state_dir", ROOT / "state")))
     authentication_required = settings.get("authentication_required", True)
@@ -367,7 +367,7 @@ def create_app(settings: dict, *, client=None, auth=None, statistics=None) -> Fa
     stats = statistics if statistics is not None else client if client is not None else LocalStatisticsReader(backend_root)
     error_root = backend_root / "log" / "error"
     legacy_error_owners = ArchiveLogOwners(backend_root)
-    daily_feedback = DailyFeedbackReader(backend_root, history_root=store.state_dir / 'task_history')
+    daily_feedback = DailyFeedbackReader(backend_root, history_root=Path(settings.get('state_dir', backend_root / 'panel_state')) / 'task_history')
     async def archive_task_plans():
         while True:
             await asyncio.sleep(60)
@@ -387,6 +387,7 @@ def create_app(settings: dict, *, client=None, auth=None, statistics=None) -> Fa
                 await job
             except asyncio.CancelledError:
                 pass
+
     locks: dict[str, asyncio.Lock] = {}
     action_cooldown: dict[str, float] = {}
     event_counts: dict[str, int] = {}
@@ -490,7 +491,7 @@ def create_app(settings: dict, *, client=None, auth=None, statistics=None) -> Fa
     def labels():
         result = {}
         # OASX exports the complete dictionary here; assets/i18n only contains
-        # additions. Load additions last so new and custom task labels win.
+        # additions. Load additions last so new and private task labels win.
         for path in (backend_root / "module" / "config" / "i18n" / "zh-CN.json",
                      backend_root / "assets" / "i18n" / "zh-CN.json"):
             try:
@@ -620,7 +621,7 @@ def create_app(settings: dict, *, client=None, auth=None, statistics=None) -> Fa
         except UpstreamError:
             accounts, menu, online = [], {}, False
         return {**session.public(), "login_required": authentication_required, "accounts": accounts, "menu": menu, "labels": await asyncio.to_thread(labels),
-                "backend_online": online, "backend_name": "OAS 后端", "domain": settings["public_origin"]}
+                "backend_online": online, "backend_name": "主仓库私库 OAS", "domain": settings["public_origin"]}
 
     @app.get("/api/accounts/{name}/snapshot")
     async def snapshot(request: Request, name: str):
@@ -656,7 +657,7 @@ def create_app(settings: dict, *, client=None, auth=None, statistics=None) -> Fa
             for row in result.get("task_config", []):
                 if isinstance(row, dict) and row.get("name") == "reset_task_datetime_enable":
                     row["readOnly"] = True
-                    row["description"] = "该OAS 后端选项会批量修改所有任务时间，请在本机 OASX 操作。"
+                    row["description"] = "该主仓库选项会批量修改所有任务时间，请在本机 OASX 操作。"
         return result
 
     @app.put("/api/accounts/{name}/settings/{task}/{group}/{argument}")
@@ -687,7 +688,8 @@ def create_app(settings: dict, *, client=None, auth=None, statistics=None) -> Fa
             if not unchanged:
                 raise HTTPException(409, "此设置已在其他界面改变，请刷新后再修改")
             kind = validate_value(field, data["value"])
-            await oas.set_value(name, task, group, argument, data["value"], kind)
+            await oas.set_value(name, task, group, argument, data["value"], kind,
+                                expected_value=expected)
             updated = await oas.settings(name, task)
             actual = next((row.get("value") for row in updated.get(group, []) if isinstance(row, dict) and row.get("name") == argument), None)
             confirmed = type(actual) is type(data["value"]) and actual == data["value"]
@@ -695,6 +697,31 @@ def create_app(settings: dict, *, client=None, auth=None, statistics=None) -> Fa
                 confirmed = math.isfinite(actual) and actual == data["value"]
             if not confirmed:
                 return JSONResponse({"detail": "后端返回的当前值与提交值不同，保存未确认，请刷新检查", "current_value": actual}, status_code=409)
+            return {"ok": True, "value": actual}
+
+    @app.post("/api/accounts/{name}/tasks/{task}/wait")
+    async def wait_task(request: Request, name: str, task: str):
+        require_session(request, write=True)
+        data = await body(request, {"expected_value"})
+        await check_task(name, task)
+        if task in ("Script", "GlobalGame"):
+            raise HTTPException(422, "此项目没有任务排程")
+        lock = locks.setdefault(name, asyncio.Lock())
+        if lock.locked():
+            raise HTTPException(409, "此配置正在处理另一项操作，请稍后重试")
+        async with lock:
+            current = await oas.settings(name, task)
+            rows = current.get('scheduler', [])
+            field = next((row for row in rows if isinstance(row, dict) and row.get('name') == 'next_run'), None) if isinstance(rows, list) else None
+            if not field or field.get('value') != data['expected_value']:
+                raise HTTPException(409, "排程已改变，请刷新后重试")
+            validate_value(field, data['expected_value'])
+            await oas.wait_task(name, task, expected_value=data['expected_value'])
+            updated = await oas.settings(name, task)
+            actual = next((row.get('value') for row in updated.get('scheduler', [])
+                           if isinstance(row, dict) and row.get('name') == 'next_run'), None)
+            if not isinstance(actual, str):
+                raise HTTPException(502, "无法确认等待时间，请刷新排程检查")
             return {"ok": True, "value": actual}
 
     @app.post("/api/accounts/{name}/actions")
